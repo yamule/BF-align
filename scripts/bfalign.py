@@ -145,50 +145,6 @@ def load_atoms(infile,n_ca_c=False):
             ret.append(pdic);
     return ret;
 
-file1 = sys.argv[1];
-file2 = sys.argv[2];
-outfile = sys.argv[3];
-ncac1 = load_atoms(file1,n_ca_c=True);
-ncac2 = load_atoms(file2,n_ca_c=True);
-
-seq1 = [];
-seq2 = [];
-for aa in ncac1:
-    seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-for aa in ncac2:
-    seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-
-len1 = len(ncac1);
-len2 = len(ncac2);
-pos1 = [];
-for ff in list(ncac1):
-    pos1.append([
-        [ff["N"].x,ff["N"].y,ff["N"].z],
-        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-        [ff["C"].x,ff["C"].y,ff["C"].z]
-    ]);
-
-pos2 = [];
-for ff in list(ncac2):
-    pos2.append([
-        [ff["N"].x,ff["N"].y,ff["N"].z],
-        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-        [ff["C"].x,ff["C"].y,ff["C"].z]
-    ]);
-
-pos1 = torch.tensor(pos1).to("cuda");
-rot1, trans1 = pos_to_frame(pos1);
-
-revframe1 = rot1.permute(0,2,1);
-
-capos1_2d = pos1[:,None,1]-pos1[None,:,1];
-capos1_2d = torch.einsum("stp,tpx->stx",capos1_2d,revframe1);
-
-pos2 = torch.tensor(pos2).to("cuda");
-rot2,trans2 = pos_to_frame(pos2);
-capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
-capos1_2d += trans2[None,:,None,:];
-
 @torch.jit.script
 def calc_rmsdsum(a,b):
     rmsd = a-b;
@@ -244,67 +200,13 @@ def calc_tmscore(a,b,lnorm):
     return tmscores;
 
 
-capos1_2d = capos1_2d.to("cuda")
-pos2 = pos2.to("cuda")
-print(capos1_2d.shape)
-max_score = 0.0;
-max_index = (0,0);
-for ii in range(capos1_2d.shape[0]):
-    briefcheck = calc_tmscore(capos1_2d[ii],pos2[:,None,1:2],capos1_2d.shape[0])
-    maxx = float(briefcheck.max().detach().cpu());
-    if maxx > max_score:
-        max_score = maxx;
-        max_index = (ii,briefcheck.argmax());
-    #break;
-
-print("max_score:",max_score,"max_index:",max_index)
-
-i1 = max_index[0]
-i2 = max_index[1]
-res_rot1 = rot1[i1];
-res_trans1 = trans1[i1];
-res_trans1 = torch.squeeze(torch.einsum("ab,bc->ac",res_rot1,res_trans1[:,None]));
-print(res_trans1.shape)
-print(res_rot1.shape)
-print(pos1.shape)
-pos_1b = torch.einsum("ab,cdb->cda",res_rot1,pos1) - res_trans1;
-# print(pos_1b[i1]);
-res_rot2 = rot2[i2];
-
-rotp = torch.einsum("ab,bc->ac",res_rot2.permute(1,0),res_rot1);
-pos_1b = torch.einsum("ab,cdb->cda",rotp,pos1);
-transp = pos2[i2,1] - pos_1b[i1,1];
-
-allresidues = load_atoms(file1);
-allatoms = [];
-allpositions = [];
-for rr in list(allresidues):
-    for aa_ in list(rr.keys()):
-        if aa_ == "idx":
-            continue;
-        aa = rr[aa_];
-        allatoms.append(aa);
-        allpositions.append(
-            [aa.x,aa.y,aa.z]
-        );
-allpositions = torch.tensor(allpositions).to("cuda");
-res = torch.einsum(
-    "ab,cb->ca",rotp,allpositions
-);
-res += transp;
-if False:
-    with open(outfile,"wt") as fout:
-        for ii in range(len(allatoms)):
-            atom = allatoms[ii];
-            atom.x = res[ii,0];
-            atom.y = res[ii,1];
-            atom.z = res[ii,2];
-            fout.write(atom.make_line()+"\n");
-
 # 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
 # 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
 # maxsqdist は二乗された距離
 def get_mapping(apos,bpos,maxsqdist):
+    
+    print(";;;",apos.shape)
+    print(";;;2",bpos.shape)
     dis = apos[:,None]-bpos[None,:];
     dis = (dis*dis).sum(dim=-1);
     idx = (-1.0*dis).argmax(dim=-1).detach().cpu();
@@ -378,28 +280,107 @@ def get_mapped_arrays(p1,p2,mapper):
         );
     return apos, bpos;
 
-if True:
+
+file1 = sys.argv[1];
+file2 = sys.argv[2];
+outfile = sys.argv[3];
+ncac1 = load_atoms(file1,n_ca_c=True);
+ncac2 = load_atoms(file2,n_ca_c=True);
+
+seq1 = [];
+seq2 = [];
+for aa in ncac1:
+    seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+for aa in ncac2:
+    seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+
+len1 = len(ncac1);
+len2 = len(ncac2);
+pos1 = [];
+for ff in list(ncac1):
+    pos1.append([
+        [ff["N"].x,ff["N"].y,ff["N"].z],
+        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+        [ff["C"].x,ff["C"].y,ff["C"].z]
+    ]);
+
+pos2 = [];
+for ff in list(ncac2):
+    pos2.append([
+        [ff["N"].x,ff["N"].y,ff["N"].z],
+        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+        [ff["C"].x,ff["C"].y,ff["C"].z]
+    ]);
+
+pos1 = torch.tensor(pos1).to("cuda");
+pos2 = torch.tensor(pos2).to("cuda");
+
+def process_(pos1,pos2,realign=True):
+    rot1, trans1 = pos_to_frame(pos1);
+
+    revframe1 = rot1.permute(0,2,1);
+
+    capos1_2d = pos1[:,None,1]-pos1[None,:,1];
+    capos1_2d = torch.einsum("stp,tpx->stx",capos1_2d,revframe1);
+
+    rot2,trans2 = pos_to_frame(pos2);
+    capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
+    capos1_2d += trans2[None,:,None,:];
+
+
+    capos1_2d = capos1_2d.to("cuda")
+    pos2 = pos2.to("cuda")
+    print(capos1_2d.shape)
+    max_score1 = 0.0;
+    max_score2 = 0.0;
+    max_index = (0,0);
+    for ii in range(capos1_2d.shape[0]):
+        briefcheck = calc_tmscore(capos1_2d[ii],pos2[:,None,1:2],capos1_2d.shape[0])
+        briefcheck2 = calc_tmscore(capos1_2d[ii],pos2[:,None,1:2],pos2.shape[0])
+        maxx = float(briefcheck.max().detach().cpu());
+        if maxx > max_score1:
+            max_score1 = maxx;
+            max_score2 = float(briefcheck2.max().detach().cpu());
+            max_index = (ii,briefcheck.argmax());
+        #break;
+
+    print("max_score:",max_score1,"max_index:",max_index)
+
+    i1 = max_index[0]
+    i2 = max_index[1]
+    res_rot1 = rot1[i1];
+    res_trans1 = trans1[i1];
+    res_trans1 = torch.squeeze(torch.einsum("ab,bc->ac",res_rot1,res_trans1[:,None]));
+    print(res_trans1.shape)
+    print(res_rot1.shape)
+    print(pos1.shape)
+    # print(pos_1b[i1]);
+    res_rot2 = rot2[i2];
+
+    rotp = torch.einsum("ab,bc->ac",res_rot2.permute(1,0),res_rot1);
+    pos_1b = torch.einsum("ab,cdb->cda",rotp,pos1);
+    transp = pos2[i2,1] - pos_1b[i1,1];
+    pos_1b += transp;
+    if not realign:
+        return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":rotp.permute(1,0),"trans":transp};
+
     from Bio.SVDSuperimposer import SVDSuperimposer ;
     import copy;
     maxsqdist = 9.0*9.0;
 
-    allcas_ = [];
-    allcas = [];
-    for ii in range(len(allatoms)):
-        atom = allatoms[ii];
-        if atom.atom_name == "CA":
-            allcas_.append(copy.deepcopy(atom));
-            allcas.append(res[ii]);
+    allcas_ = copy.deepcopy(pos1[:,1]);
+    allcas = pos_1b[:,1];
     maxmap = None;
-    maxscore = 0.0;
+    maxscore1 = 0.0;
+    maxscore2 = 0.0;
     maxmat = None;
 
-    allcas = torch.stack(allcas,dim=0);
     print(allcas.shape)
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
     for _ in range(5):
         print(mapper)
-        allcas = torch.tensor(([[a.x,a.y,a.z] for a in list(allcas_)]),device="cuda");
+        allcas = copy.deepcopy(allcas_);
+        print("!!!",allcas[0]);
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
         #print(np.array(apos).shape,np.array(bpos).shape);
         #print(apos,bpos)
@@ -420,69 +401,89 @@ if True:
         tmscore2 = calc_tmscore(apos,bpos,len2);
         print(tmscore1)
         print(tmscore2)
-        if tmscore1 > maxscore:
+        if tmscore1 > maxscore1:
             maxmat = (rot,trans);
-            maxscore = tmscore1;
+            maxscore1 = tmscore1;
+            maxscore2 = tmscore2;
             maxmap = mapper;
         else:
             break;
-        allcas = [[a.x,a.y,a.z] for a in list(allcas_)];
+    return {"tmscore1":maxscore1,"tmscore2":maxscore2,"rot":maxmat[0],"trans":maxmat[1]};
 
-    aseq = [];
-    bseq = [];
-    ii = 0;
-    while ii < len(maxmap):
-        if maxmap[ii] is not None:
-            bstart = maxmap[ii];
-            bend = maxmap[ii];
-            aend = ii;
-            for jj in range(ii+1,len(maxmap)):
-                if maxmap[jj] is not None:
-                    if maxmap[jj] > bend:
-                        bend = maxmap[jj];
-                        aend = jj;
-                    else:
-                        break;
-            aseq_ = ["{:>5} ".format(str(ii+1))];
-            bseq_ = ["{:>5} ".format(str(bstart+1))];
-            bi = bstart -1;
-            for jj in range(ii,aend+1):
-                if maxmap[jj] is None:
-                    aseq_.append(seq1[jj]);
-                    bseq_.append("-");
+res = process_(pos1,pos2,realign=True);
+rotp = res["rot"];
+transp = res["trans"];
+
+allresidues = load_atoms(file1);
+allatoms = [];
+allpositions = [];
+for rr in list(allresidues):
+    for aa_ in list(rr.keys()):
+        if aa_ == "idx":
+            continue;
+        aa = rr[aa_];
+        allatoms.append(aa);
+        allpositions.append([aa.x,aa.y,aa.z]);
+allpositions = torch.tensor(allpositions).to("cuda");
+res = torch.einsum(
+    "ab,bc->ac",allpositions,rotp
+);
+res += transp;
+allcas = [];
+for eii,aa in enumerate(allatoms):
+    if aa.atom_name == "CA":
+        allcas.append(res[eii]);
+print(allcas[0].shape)
+print(torch.stack(allcas,dim=0).shape)
+#raise Exception();
+maxmap = get_mapping(torch.stack(allcas,dim=0),pos2[:,1],8.0*8.0);
+aseq = [];
+bseq = [];
+ii = 0;
+while ii < len(maxmap):
+    if maxmap[ii] is not None:
+        bstart = maxmap[ii];
+        bend = maxmap[ii];
+        aend = ii;
+        for jj in range(ii+1,len(maxmap)):
+            if maxmap[jj] is not None:
+                if maxmap[jj] > bend:
+                    bend = maxmap[jj];
+                    aend = jj;
                 else:
-                    while maxmap[jj] > bi+1:
-                        aseq_.append("-");
-                        bi += 1;
-                        bseq_.append(seq2[bi]);
-                    aseq_.append(seq1[jj]);
+                    break;
+        aseq_ = ["{:>5} ".format(str(ii+1))];
+        bseq_ = ["{:>5} ".format(str(bstart+1))];
+        bi = bstart -1;
+        for jj in range(ii,aend+1):
+            if maxmap[jj] is None:
+                aseq_.append(seq1[jj]);
+                bseq_.append("-");
+            else:
+                while maxmap[jj] > bi+1:
+                    aseq_.append("-");
                     bi += 1;
-                    bseq_.append(seq2[bi])
-            aseq_.append(" "+str(aend+1));
-            bseq_.append(" "+str(bend+1));
-            aseq.append("".join(aseq_));
-            bseq.append("".join(bseq_));
-            ii = aend+1;
-        else:
-            ii += 1;
-    allpositions = [];
-    for aa in list(allatoms):
-        allpositions.append(
-            [aa.x,aa.y,aa.z]
-        );
-    allpositions = torch.tensor(allpositions).to("cuda");
+                    bseq_.append(seq2[bi]);
+                aseq_.append(seq1[jj]);
+                bi += 1;
+                bseq_.append(seq2[bi])
+        aseq_.append(" "+str(aend+1));
+        bseq_.append(" "+str(bend+1));
+        aseq.append("".join(aseq_));
+        bseq.append("".join(bseq_));
+        ii = aend+1;
+    else:
+        ii += 1;
 
-    res = torch.einsum(
-        "cb,ba->ca",allpositions,rot
-    )+trans;
+with open(outfile,"wt") as fout:
+    for ii in range(len(allatoms)):
+        atom = allatoms[ii];
+        atom.x = res[ii,0];
+        atom.y = res[ii,1];
+        atom.z = res[ii,2];
+        fout.write(atom.make_line()+"\n");
+for aa,bb in zip(aseq,bseq):
+    print(aa);
+    print(bb);
+    print();
 
-    with open(outfile+".svd.pdb","wt") as fout:
-        for ii in range(len(allatoms)):
-            atom = allatoms[ii];
-            atom.x = res[ii,0];
-            atom.y = res[ii,1];
-            atom.z = res[ii,2];
-            fout.write(atom.make_line()+"\n");
-    for aa,bb in zip(aseq,bseq):
-        print(aa);
-        print(bb);
