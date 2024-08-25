@@ -3,6 +3,9 @@ import numpy as np;
 import gzip;       
 import torch
 
+aa_3_1_ = {"ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E"
+,"GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P"
+,"SER":"S","THR":"T","TRP":"W","TYR":"Y","VAL":"V"};
 
 class PDBAtom:
     
@@ -148,6 +151,13 @@ outfile = sys.argv[3];
 ncac1 = load_atoms(file1,n_ca_c=True);
 ncac2 = load_atoms(file2,n_ca_c=True);
 
+seq1 = [];
+seq2 = [];
+for aa in ncac1:
+    seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+for aa in ncac2:
+    seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+
 len1 = len(ncac1);
 len2 = len(ncac2);
 pos1 = [];
@@ -157,22 +167,6 @@ for ff in list(ncac1):
         [ff["CA"].x,ff["CA"].y,ff["CA"].z],
         [ff["C"].x,ff["C"].y,ff["C"].z]
     ]);
-pos1 = torch.tensor(pos1).to("cuda");
-rot1, trans1 = pos_to_frame(pos1);
-
-revframe1 = rot1.permute(0,2,1);
-
-test = False;
-if test:
-    pos1_2d = pos1[:,None]-pos1[None,:,1:2];
-    pos1_2d = torch.einsum("stqp,tpx->stqx",pos1_2d,revframe1);
-    for pp in range(pos1_2d.shape[0]):
-        assert (torch.abs(pos1_2d[pp,pp,:,1]) < 0.0001).all();
-    exit(0);
-
-capos1_2d = pos1[:,None,1]-pos1[None,:,1];
-capos1_2d = torch.einsum("stp,tpx->stx",capos1_2d,revframe1);
-
 
 pos2 = [];
 for ff in list(ncac2):
@@ -181,6 +175,15 @@ for ff in list(ncac2):
         [ff["CA"].x,ff["CA"].y,ff["CA"].z],
         [ff["C"].x,ff["C"].y,ff["C"].z]
     ]);
+
+pos1 = torch.tensor(pos1).to("cuda");
+rot1, trans1 = pos_to_frame(pos1);
+
+revframe1 = rot1.permute(0,2,1);
+
+capos1_2d = pos1[:,None,1]-pos1[None,:,1];
+capos1_2d = torch.einsum("stp,tpx->stx",capos1_2d,revframe1);
+
 pos2 = torch.tensor(pos2).to("cuda");
 rot2,trans2 = pos_to_frame(pos2);
 capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
@@ -289,13 +292,14 @@ res = torch.einsum(
     "ab,cb->ca",rotp,allpositions
 );
 res += transp;
-with open(outfile,"wt") as fout:
-    for ii in range(len(allatoms)):
-        atom = allatoms[ii];
-        atom.x = res[ii,0];
-        atom.y = res[ii,1];
-        atom.z = res[ii,2];
-        fout.write(atom.make_line()+"\n");
+if False:
+    with open(outfile,"wt") as fout:
+        for ii in range(len(allatoms)):
+            atom = allatoms[ii];
+            atom.x = res[ii,0];
+            atom.y = res[ii,1];
+            atom.z = res[ii,2];
+            fout.write(atom.make_line()+"\n");
 
 # 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
 # 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
@@ -357,6 +361,8 @@ def get_mapping(apos,bpos,maxsqdist):
 
     return mapper;
 
+# mapper は p1[index]->p2index の配列。p2 にマップされていない場合は None
+# 返り値はマップされた点が同じインデクスに入った二つの配列
 def get_mapped_arrays(p1,p2,mapper):
     apos = [];
     bpos = [];
@@ -378,18 +384,22 @@ if True:
     maxsqdist = 9.0*9.0;
 
     allcas_ = [];
+    allcas = [];
     for ii in range(len(allatoms)):
         atom = allatoms[ii];
         if atom.atom_name == "CA":
             allcas_.append(copy.deepcopy(atom));
+            allcas.append(res[ii]);
+    maxmap = None;
+    maxscore = 0.0;
+    maxmat = None;
 
+    allcas = torch.stack(allcas,dim=0);
+    print(allcas.shape)
+    mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
     for _ in range(5):
-        allcas = [[a.x,a.y,a.z] for a in list(allcas_)];
-        
-        allcas = torch.tensor(allcas,device="cuda");
-        mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
         print(mapper)
-
+        allcas = torch.tensor(([[a.x,a.y,a.z] for a in list(allcas_)]),device="cuda");
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
         #print(np.array(apos).shape,np.array(bpos).shape);
         #print(apos,bpos)
@@ -410,11 +420,51 @@ if True:
         tmscore2 = calc_tmscore(apos,bpos,len2);
         print(tmscore1)
         print(tmscore2)
-        for ii in range(len(allcas)):
-            allcas_[ii].x = allcas[ii,0];
-            allcas_[ii].y = allcas[ii,1];
-            allcas_[ii].z = allcas[ii,2];
-    
+        if tmscore1 > maxscore:
+            maxmat = (rot,trans);
+            maxscore = tmscore1;
+            maxmap = mapper;
+        else:
+            break;
+        allcas = [[a.x,a.y,a.z] for a in list(allcas_)];
+
+    aseq = [];
+    bseq = [];
+    ii = 0;
+    while ii < len(maxmap):
+        if maxmap[ii] is not None:
+            bstart = maxmap[ii];
+            bend = maxmap[ii];
+            aend = ii;
+            for jj in range(ii+1,len(maxmap)):
+                if maxmap[jj] is not None:
+                    if maxmap[jj] > bend:
+                        bend = maxmap[jj];
+                        aend = jj;
+                    else:
+                        break;
+            aseq_ = ["{:>5} ".format(str(ii+1))];
+            bseq_ = ["{:>5} ".format(str(bstart+1))];
+            bi = bstart -1;
+            for jj in range(ii,aend+1):
+                if maxmap[jj] is None:
+                    aseq_.append(seq1[jj]);
+                    bseq_.append("-");
+                else:
+                    while maxmap[jj] > bi+1:
+                        aseq_.append("-");
+                        bi += 1;
+                        bseq_.append(seq2[bi]);
+                    aseq_.append(seq1[jj]);
+                    bi += 1;
+                    bseq_.append(seq2[bi])
+            aseq_.append(" "+str(aend+1));
+            bseq_.append(" "+str(bend+1));
+            aseq.append("".join(aseq_));
+            bseq.append("".join(bseq_));
+            ii = aend+1;
+        else:
+            ii += 1;
     allpositions = [];
     for aa in list(allatoms):
         allpositions.append(
@@ -432,5 +482,7 @@ if True:
             atom.x = res[ii,0];
             atom.y = res[ii,1];
             atom.z = res[ii,2];
-
             fout.write(atom.make_line()+"\n");
+    for aa,bb in zip(aseq,bseq):
+        print(aa);
+        print(bb);
