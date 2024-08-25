@@ -98,8 +98,6 @@ def pos_to_frame(arr):
     # print(dist(n_ca,norm2));
     return torch.stack([n_ca,norm,norm2],axis=1),arr[:,1];
 
-
-
 def load_atoms(infile,n_ca_c=False):
     if infile.endswith("pdb.gz"):
         fin = gzip.open(infile,"rt");
@@ -149,6 +147,9 @@ file2 = sys.argv[2];
 outfile = sys.argv[3];
 ncac1 = load_atoms(file1,n_ca_c=True);
 ncac2 = load_atoms(file2,n_ca_c=True);
+
+len1 = len(ncac1);
+len2 = len(ncac2);
 pos1 = [];
 for ff in list(ncac1):
     pos1.append([
@@ -183,14 +184,12 @@ for ff in list(ncac2):
 pos2 = torch.tensor(pos2).to("cuda");
 rot2,trans2 = pos_to_frame(pos2);
 capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
-print(capos1_2d[0:3,0:3])
 capos1_2d += trans2[None,:,None,:];
 
 @torch.jit.script
 def calc_rmsdsum(a,b):
     rmsd = a-b;
     rmsd = torch.sqrt(torch.sum((rmsd*rmsd),dim=-1));
-    print(rmsd.shape)
     briefcheck = torch.sum((torch.min(rmsd,dim=-1)[0] < 3.0).to(torch.int32),dim=-1);
     return briefcheck;
 """
@@ -232,9 +231,13 @@ def calc_tmscore(a,b,lnorm):
 
     rmsd = a-b;
     rmsd = torch.sum((rmsd*rmsd),dim=-1);
-    mask = torch.zeros_like(rmsd).scatter(-1, (-1.0*rmsd).argmax(-1,True), value=1);
-    mask = (rmsd <= d0_search2).to(torch.int32)*mask;
+    if len(a.shape) > 2:
+        mask = torch.zeros_like(rmsd).scatter(-1, (-1.0*rmsd).argmax(-1,True), value=1);
+        mask = (rmsd <= d0_search2).to(torch.int32)*mask;
+    else:
+        mask = (rmsd <= d0_search2).to(torch.int32);
     tmscores = (((1.0/(1.0+rmsd/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
+    
     return tmscores;
 
 
@@ -262,7 +265,7 @@ print(res_trans1.shape)
 print(res_rot1.shape)
 print(pos1.shape)
 pos_1b = torch.einsum("ab,cdb->cda",res_rot1,pos1) - res_trans1;
-print(pos_1b[i1]);
+# print(pos_1b[i1]);
 res_rot2 = rot2[i2];
 
 rotp = torch.einsum("ab,bc->ac",res_rot2.permute(1,0),res_rot1);
@@ -294,11 +297,140 @@ with open(outfile,"wt") as fout:
         atom.z = res[ii,2];
         fout.write(atom.make_line()+"\n");
 
+# 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
+# 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
+# maxsqdist は二乗された距離
+def get_mapping(apos,bpos,maxsqdist):
+    dis = apos[:,None]-bpos[None,:];
+    dis = (dis*dis).sum(dim=-1);
+    idx = (-1.0*dis).argmax(dim=-1).detach().cpu();
+    mapper_rev = {};
+    mapper = [None for ii in range(dis.shape[0])];
+    updated = [ii for ii in range(dis.shape[0])];
+    while len(updated) > 0:
+        updated_new = [];
+        while len(updated) > 0:
+            ii = updated.pop();
+            if len(idx) > 0:
+                amax = int(idx[ii]);
+            else:
+                mindis = 999;
+                amax = None;
+                
+                # dist2(CA_A1, CA_B1) > dist2(CA_A1, CA_B2)
+                # dist2(CA_A2, CA_B2) > dist2(CA_A1, CA_B2)
+                # dist2(CA_A1, CA_B1) < maxsqdist
+                # dist2(CA_A1, CA_B2) < maxsqdist
+                # dist2(CA_A2, CA_B1) > maxsqdist
+                # dist2(CA_A2, CA_B2) < maxsqdist
+                # のようなケースの時、最適なマッピングは CA_A1->CA_B1, CA_A2->CA_B2
+                # だが、そのようなケースには対応してない。CA_A1->CA_B2, CA_A2->None になる。
 
-"""
-ここから
-pos1 をグローバルに戻す
-pos2 にマップする
-幾つか出力してみる
-スコアを計算する
-"""
+                for jj in range(dis.shape[1]):
+                    ddis =  dis[ii,jj]
+                    if jj in mapper_rev and dis[mapper_rev[jj],jj] < ddis:
+                        continue;
+                    if mindis > ddis:
+                        mindis = ddis;
+                        amax = jj;
+            if amax is None:
+                mapper[ii] = None;
+                continue;
+            if dis[ii,amax] > maxsqdist:
+                mapper[ii] = None;
+                continue;
+            if amax in mapper_rev:
+                if dis[ii,amax] < dis[mapper_rev[amax],amax]:
+                    mapper[mapper_rev[amax]] = None;
+                    updated_new.append(mapper_rev[amax]);
+                else:
+                    amax = None;
+                    updated_new.append(ii);
+            if amax is not None:
+                mapper_rev[amax] = ii;
+            mapper[ii]  = amax;
+        updated = updated_new;
+        idx = [];
+
+    assert len(mapper) == apos.shape[0]
+    
+
+    return mapper;
+
+def get_mapped_arrays(p1,p2,mapper):
+    apos = [];
+    bpos = [];
+    for ii in range(len(mapper)):
+        jj = mapper[ii];
+        if jj is None:
+            continue;
+        apos.append(
+            [p1[ii,0],p1[ii,1],p1[ii,2]]
+        );
+        bpos.append(
+            [p2[jj,0],p2[jj,1],p2[jj,2]]
+        );
+    return apos, bpos;
+
+if True:
+    from Bio.SVDSuperimposer import SVDSuperimposer ;
+    import copy;
+    maxsqdist = 9.0*9.0;
+
+    allcas_ = [];
+    for ii in range(len(allatoms)):
+        atom = allatoms[ii];
+        if atom.atom_name == "CA":
+            allcas_.append(copy.deepcopy(atom));
+
+    for _ in range(5):
+        allcas = [[a.x,a.y,a.z] for a in list(allcas_)];
+        
+        allcas = torch.tensor(allcas,device="cuda");
+        mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
+        print(mapper)
+
+        apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
+        #print(np.array(apos).shape,np.array(bpos).shape);
+        #print(apos,bpos)
+        sup = SVDSuperimposer();
+        sup.set(np.array(bpos),np.array(apos));
+        sup.run();
+        rot,trans = sup.get_rotran();
+        rot = torch.tensor(rot,device="cuda");
+        print(rot);
+        trans = torch.tensor(trans,device="cuda");
+        allcas = torch.einsum("ab,bc->ac",allcas,rot)+trans;
+        mapper = get_mapping(allcas,pos2[:,1],maxsqdist)
+        print(mapper)
+        apos,bpos = get_mapped_arrays(allcas,pos2[:,1],mapper);
+        apos = torch.tensor(apos).to("cuda")
+        bpos = torch.tensor(bpos).to("cuda")
+        tmscore1 = calc_tmscore(apos,bpos,len1);
+        tmscore2 = calc_tmscore(apos,bpos,len2);
+        print(tmscore1)
+        print(tmscore2)
+        for ii in range(len(allcas)):
+            allcas_[ii].x = allcas[ii,0];
+            allcas_[ii].y = allcas[ii,1];
+            allcas_[ii].z = allcas[ii,2];
+    
+    allpositions = [];
+    for aa in list(allatoms):
+        allpositions.append(
+            [aa.x,aa.y,aa.z]
+        );
+    allpositions = torch.tensor(allpositions).to("cuda");
+
+    res = torch.einsum(
+        "cb,ba->ca",allpositions,rot
+    )+trans;
+
+    with open(outfile+".svd.pdb","wt") as fout:
+        for ii in range(len(allatoms)):
+            atom = allatoms[ii];
+            atom.x = res[ii,0];
+            atom.y = res[ii,1];
+            atom.z = res[ii,2];
+
+            fout.write(atom.make_line()+"\n");
