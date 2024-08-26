@@ -101,7 +101,7 @@ def pos_to_frame(arr):
     # print(dist(n_ca,norm2));
     return torch.stack([n_ca,norm,norm2],axis=1),arr[:,1];
 
-def load_atoms(infile,n_ca_c=False):
+def load_atoms(infile,targets=None):
     if infile.endswith("pdb.gz"):
         fin = gzip.open(infile,"rt");
     else:
@@ -109,10 +109,7 @@ def load_atoms(infile,n_ca_c=False):
     alllines = fin.readlines();
     fin.close();
     residue_atoms = {};
-    if n_ca_c:
-        targets = set(["N","CA","C"]);
-    else:
-        targets = None;
+    
     altloc = set(["A"," ",".","?"]);
     modelnum = "0";
     for li in range(len(alllines)):
@@ -138,14 +135,14 @@ def load_atoms(infile,n_ca_c=False):
     ret = [];
     for ll in list(lkey):
         pdic = residue_atoms[ll];
-        if n_ca_c:
-            if "N" in pdic and "CA" in pdic and "C" in pdic:
+        if targets is not None:
+            assert "idx" in pdic;
+            if len(pdic.keys()) == len(targets)+1:
                 ret.append(pdic);
         else:
             ret.append(pdic);
     return ret;
 
-@torch.jit.script
 def calc_rmsdsum(a,b):
     rmsd = a-b;
     rmsd = torch.sqrt(torch.sum((rmsd*rmsd),dim=-1));
@@ -205,8 +202,6 @@ def calc_tmscore(a,b,lnorm):
 # maxsqdist は二乗された距離
 def get_mapping(apos,bpos,maxsqdist):
     
-    print(";;;",apos.shape)
-    print(";;;2",bpos.shape)
     dis = apos[:,None]-bpos[None,:];
     dis = (dis*dis).sum(dim=-1);
     idx = (-1.0*dis).argmax(dim=-1).detach().cpu();
@@ -280,37 +275,72 @@ def get_mapped_arrays(p1,p2,mapper):
         );
     return apos, bpos;
 
-
 file1 = sys.argv[1];
 file2 = sys.argv[2];
 outfile = sys.argv[3];
-ncac1 = load_atoms(file1,n_ca_c=True);
-ncac2 = load_atoms(file2,n_ca_c=True);
 
 seq1 = [];
 seq2 = [];
-for aa in ncac1:
-    seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-for aa in ncac2:
-    seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-
-len1 = len(ncac1);
-len2 = len(ncac2);
 pos1 = [];
-for ff in list(ncac1):
-    pos1.append([
-        [ff["N"].x,ff["N"].y,ff["N"].z],
-        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-        [ff["C"].x,ff["C"].y,ff["C"].z]
-    ]);
-
 pos2 = [];
-for ff in list(ncac2):
-    pos2.append([
-        [ff["N"].x,ff["N"].y,ff["N"].z],
-        [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-        [ff["C"].x,ff["C"].y,ff["C"].z]
-    ]);
+
+
+if False:
+    ncac1 = load_atoms(file1,targets=set(["N","CA","C"]));
+    ncac2 = load_atoms(file2,targets=set(["N","CA","C"]));
+    for aa in ncac1:
+        seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+    for aa in ncac2:
+        seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+
+    for ff in list(ncac1):
+        pos1.append([
+            [ff["N"].x,ff["N"].y,ff["N"].z],
+            [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+            [ff["C"].x,ff["C"].y,ff["C"].z]
+        ]);
+
+    for ff in list(ncac2):
+        pos2.append([
+            [ff["N"].x,ff["N"].y,ff["N"].z],
+            [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+            [ff["C"].x,ff["C"].y,ff["C"].z]
+        ]);
+else:
+    ca1 = load_atoms(file1,targets=set(["CA"]));
+    ca2 = load_atoms(file2,targets=set(["CA"]));
+    for aa in list(ca1):
+        seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+    for aa in list(ca2):
+        seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+
+    # ca を 3 つ使用して三角形を作る
+    # 最初と最後は並ぶことを想定していないダミー
+    def ca_triangle(cas):
+        ret = [];
+        ret.append([
+            [cas[2]["CA"].x,cas[2]["CA"].y,cas[2]["CA"].z],
+            [cas[0]["CA"].x,cas[0]["CA"].y,cas[0]["CA"].z],
+            [cas[1]["CA"].x,cas[1]["CA"].y,cas[1]["CA"].z]
+        ]);
+        for ii in range(1,len(cas)-1):
+            ret.append([
+                [cas[ii-1]["CA"].x,cas[ii-1]["CA"].y,cas[ii-1]["CA"].z],
+                [cas[ii]["CA"].x,cas[ii]["CA"].y,cas[ii]["CA"].z],
+                [cas[ii+1]["CA"].x,cas[ii+1]["CA"].y,cas[ii+1]["CA"].z]
+            ]);
+
+        ret.append([
+            [cas[-3]["CA"].x,cas[-3]["CA"].y,cas[-3]["CA"].z],
+            [cas[-1]["CA"].x,cas[-1]["CA"].y,cas[-1]["CA"].z],
+            [cas[-2]["CA"].x,cas[-2]["CA"].y,cas[-2]["CA"].z]
+        ]);
+        return ret;
+    pos1 = ca_triangle(ca1);
+    pos2 = ca_triangle(ca2);
+
+len1 = len(pos1);
+len2 = len(pos2);
 
 pos1 = torch.tensor(pos1).to("cuda");
 pos2 = torch.tensor(pos2).to("cuda");
@@ -378,9 +408,9 @@ def process_(pos1,pos2,realign=True):
     print(allcas.shape)
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
     for _ in range(5):
-        print(mapper)
+        #print(mapper)
         allcas = copy.deepcopy(allcas_);
-        print("!!!",allcas[0]);
+        #print("!!!",allcas[0]);
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
         #print(np.array(apos).shape,np.array(bpos).shape);
         #print(apos,bpos)
@@ -389,19 +419,20 @@ def process_(pos1,pos2,realign=True):
         sup.run();
         rot,trans = sup.get_rotran();
         rot = torch.tensor(rot,device="cuda");
-        print(rot);
+        #print(rot);
         trans = torch.tensor(trans,device="cuda");
         allcas = torch.einsum("ab,bc->ac",allcas,rot)+trans;
         mapper = get_mapping(allcas,pos2[:,1],maxsqdist)
-        print(mapper)
+        #print(mapper)
         apos,bpos = get_mapped_arrays(allcas,pos2[:,1],mapper);
         apos = torch.tensor(apos).to("cuda")
         bpos = torch.tensor(bpos).to("cuda")
         tmscore1 = calc_tmscore(apos,bpos,len1);
         tmscore2 = calc_tmscore(apos,bpos,len2);
-        print(tmscore1)
-        print(tmscore2)
+        #print(tmscore1)
+        #print(tmscore2)
         if tmscore1 > maxscore1:
+            print(tmscore1,"<-",maxscore1)
             maxmat = (rot,trans);
             maxscore1 = tmscore1;
             maxscore2 = tmscore2;
