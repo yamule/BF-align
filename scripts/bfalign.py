@@ -197,13 +197,17 @@ def calc_tmscore(a,b,lnorm):
     return tmscores;
 
 
+def calc_dist2(apos,bpos):
+    dis = apos[:,None]-bpos[None,:];
+    dis = (dis*dis).sum(dim=-1);
+    return dis;
+
 # 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
 # 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
 # maxsqdist は二乗された距離
 def get_mapping(apos,bpos,maxsqdist):
     
-    dis = apos[:,None]-bpos[None,:];
-    dis = (dis*dis).sum(dim=-1);
+    dis = calc_dist2(apos,bpos);
     idx = (-1.0*dis).argmax(dim=-1).detach().cpu();
     mapper_rev = {};
     mapper = [None for ii in range(dis.shape[0])];
@@ -255,7 +259,6 @@ def get_mapping(apos,bpos,maxsqdist):
 
     assert len(mapper) == apos.shape[0]
     
-
     return mapper;
 
 # mapper は p1[index]->p2index の配列。p2 にマップされていない場合は None
@@ -396,7 +399,7 @@ def process_(pos1,pos2,realign=True):
 
     from Bio.SVDSuperimposer import SVDSuperimposer ;
     import copy;
-    maxsqdist = 9.0*9.0;
+    maxsqdist = 8.0*8.0;
 
     allcas_ = copy.deepcopy(pos1[:,1]);
     allcas = pos_1b[:,1];
