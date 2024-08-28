@@ -28,7 +28,7 @@ class PDBAtom:
         self.element = line[76:78];
         self.charge = line[79:80];
     
-    #alt pos 以外を入れる
+    # return labels without alt_pos
     def get_atom_label(self):
         return self.chain_id+"#"+self.residue_name+"#"+str(self.residue_pos)+"#"+self.insertion_code+"#"+self.atom_name;
     
@@ -205,9 +205,9 @@ def calc_tmscore(a,b,lnorm):
     return tmscores;
 
 
-# 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
-# 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
-# maxsqdist は二乗された距離
+# Calculate distances between all points in apos and all points in bpos, and return a list of indices of the closest points in bpos for each point in apos.
+# If multiple points are mapped to the same point, only the one with the shortest distance is returned. If a point couldn't be mapped, None is inserted.
+# 'maxsqdist' is the squared distance
 def get_mapping(apos,bpos,maxsqdist):
     
     dis = dist2(apos,bpos);
@@ -225,14 +225,15 @@ def get_mapping(apos,bpos,maxsqdist):
                 mindis = 999;
                 amax = None;
                 
+                # In cases like:
                 # dist2(CA_A1, CA_B1) > dist2(CA_A1, CA_B2)
                 # dist2(CA_A2, CA_B2) > dist2(CA_A1, CA_B2)
                 # dist2(CA_A1, CA_B1) < maxsqdist
                 # dist2(CA_A1, CA_B2) < maxsqdist
                 # dist2(CA_A2, CA_B1) > maxsqdist
                 # dist2(CA_A2, CA_B2) < maxsqdist
-                # のようなケースの時、最適なマッピングは CA_A1->CA_B1, CA_A2->CA_B2
-                # だが、そのようなケースには対応してない。CA_A1->CA_B2, CA_A2->None になる。
+                # The optimal mapping would be CA_A1->CA_B1, CA_A2->CA_B2
+                # However, this case is not handled. It will result in CA_A1->CA_B2, CA_A2->None.
 
                 for jj in range(dis.shape[1]):
                     ddis =  dis[ii,jj]
@@ -264,8 +265,8 @@ def get_mapping(apos,bpos,maxsqdist):
     
     return mapper;
 
-# mapper は p1[index]->p2index の配列。p2 にマップされていない場合は None
-# 返り値はマップされた点が同じインデクスに入った二つの配列
+# mapper is an array of p1[index]->p2index. If not mapped to p2, it's 'None'.
+# Returns two arrays with same length, where mapped points are at the same index.
 def get_mapped_arrays(p1,p2,mapper):
     apos = [];
     bpos = [];
@@ -440,8 +441,8 @@ if __name__=="__main__":
         for aa in list(ca2):
             seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
 
-        # ca を 3 つ使用して三角形を作る
-        # 最初と最後は並ぶことを想定していないダミー
+        # Create a triangle using 3 CA atoms.
+        # The first and last are dummy triangles not expected to align.
         def ca_triangle(cas):
             ret = [];
             ret.append([
@@ -547,4 +548,3 @@ if __name__=="__main__":
         print("file1:",aa);
         print("file2:",bb);
         print();
-
