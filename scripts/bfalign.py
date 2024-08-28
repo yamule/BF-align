@@ -1,7 +1,8 @@
 import re,os,sys;
 import numpy as np;
 import gzip;       
-import torch
+import torch;
+import argparse;
 
 aa_3_1_ = {"ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E"
 ,"GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P"
@@ -89,6 +90,14 @@ def dist(a,b):
     c = a-b;
     return torch.sqrt((c*c).sum(axis=-1));
 
+def dist2(apos,bpos):
+    dis = apos[:,None]-bpos[None,:];
+    dis = (dis*dis).sum(dim=-1);
+    return dis;
+
+# Construct local axis from 3 points.
+# I couldn't remember where I learned this algorithm. It may be more than 10 years ago.
+# I think some tutorials of Three.js or DirectX.
 def pos_to_frame(arr):
     assert len(arr.shape) == 3;
     n_ca = normalize(arr[:,0]-arr[:,1]);
@@ -164,7 +173,6 @@ def calc_rmsdsum(a,b):
  *
 */
 """
-@torch.jit.script
 def calc_tmscore(a,b,lnorm):
     D0_MIN = torch.tensor(0.5);
 
@@ -197,17 +205,12 @@ def calc_tmscore(a,b,lnorm):
     return tmscores;
 
 
-def calc_dist2(apos,bpos):
-    dis = apos[:,None]-bpos[None,:];
-    dis = (dis*dis).sum(dim=-1);
-    return dis;
-
 # 二つの点群の全点 vs 全点で距離を計算し、apos から最も近い bpos の点のインデクスが入ったリストを返す。
 # 同じ点にマップされた場合は、距離の近い方のみ返す。マップできなかった場合 None が入っている。
 # maxsqdist は二乗された距離
 def get_mapping(apos,bpos,maxsqdist):
     
-    dis = calc_dist2(apos,bpos);
+    dis = dist2(apos,bpos);
     idx = (-1.0*dis).argmax(dim=-1).detach().cpu();
     mapper_rev = {};
     mapper = [None for ii in range(dis.shape[0])];
@@ -278,77 +281,9 @@ def get_mapped_arrays(p1,p2,mapper):
         );
     return apos, bpos;
 
-file1 = sys.argv[1];
-file2 = sys.argv[2];
-outfile = sys.argv[3];
-
-seq1 = [];
-seq2 = [];
-pos1 = [];
-pos2 = [];
-
-
-if False:
-    ncac1 = load_atoms(file1,targets=set(["N","CA","C"]));
-    ncac2 = load_atoms(file2,targets=set(["N","CA","C"]));
-    for aa in ncac1:
-        seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-    for aa in ncac2:
-        seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-
-    for ff in list(ncac1):
-        pos1.append([
-            [ff["N"].x,ff["N"].y,ff["N"].z],
-            [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-            [ff["C"].x,ff["C"].y,ff["C"].z]
-        ]);
-
-    for ff in list(ncac2):
-        pos2.append([
-            [ff["N"].x,ff["N"].y,ff["N"].z],
-            [ff["CA"].x,ff["CA"].y,ff["CA"].z],
-            [ff["C"].x,ff["C"].y,ff["C"].z]
-        ]);
-else:
-    ca1 = load_atoms(file1,targets=set(["CA"]));
-    ca2 = load_atoms(file2,targets=set(["CA"]));
-    for aa in list(ca1):
-        seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-    for aa in list(ca2):
-        seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
-
-    # ca を 3 つ使用して三角形を作る
-    # 最初と最後は並ぶことを想定していないダミー
-    def ca_triangle(cas):
-        ret = [];
-        ret.append([
-            [cas[2]["CA"].x,cas[2]["CA"].y,cas[2]["CA"].z],
-            [cas[0]["CA"].x,cas[0]["CA"].y,cas[0]["CA"].z],
-            [cas[1]["CA"].x,cas[1]["CA"].y,cas[1]["CA"].z]
-        ]);
-        for ii in range(1,len(cas)-1):
-            ret.append([
-                [cas[ii-1]["CA"].x,cas[ii-1]["CA"].y,cas[ii-1]["CA"].z],
-                [cas[ii]["CA"].x,cas[ii]["CA"].y,cas[ii]["CA"].z],
-                [cas[ii+1]["CA"].x,cas[ii+1]["CA"].y,cas[ii+1]["CA"].z]
-            ]);
-
-        ret.append([
-            [cas[-3]["CA"].x,cas[-3]["CA"].y,cas[-3]["CA"].z],
-            [cas[-1]["CA"].x,cas[-1]["CA"].y,cas[-1]["CA"].z],
-            [cas[-2]["CA"].x,cas[-2]["CA"].y,cas[-2]["CA"].z]
-        ]);
-        return ret;
-    pos1 = ca_triangle(ca1);
-    pos2 = ca_triangle(ca2);
-
-len1 = len(pos1);
-len2 = len(pos2);
-
-pos1 = torch.tensor(pos1).to("cuda");
-pos2 = torch.tensor(pos2).to("cuda");
 
 def process_(pos1,pos2,realign=True):
+    ddev = pos1.device
     rot1, trans1 = pos_to_frame(pos1);
 
     revframe1 = rot1.permute(0,2,1);
@@ -361,8 +296,8 @@ def process_(pos1,pos2,realign=True):
     capos1_2d += trans2[None,:,None,:];
 
 
-    capos1_2d = capos1_2d.to("cuda")
-    pos2 = pos2.to("cuda")
+    capos1_2d = capos1_2d
+    pos2 = pos2
     print(capos1_2d.shape)
     max_score1 = 0.0;
     max_score2 = 0.0;
@@ -421,15 +356,15 @@ def process_(pos1,pos2,realign=True):
         sup.set(np.array(bpos),np.array(apos));
         sup.run();
         rot,trans = sup.get_rotran();
-        rot = torch.tensor(rot,device="cuda");
+        rot = torch.tensor(rot,device=ddev);
         #print(rot);
-        trans = torch.tensor(trans,device="cuda");
+        trans = torch.tensor(trans,device=ddev);
         allcas = torch.einsum("ab,bc->ac",allcas,rot)+trans;
         mapper = get_mapping(allcas,pos2[:,1],maxsqdist)
         #print(mapper)
         apos,bpos = get_mapped_arrays(allcas,pos2[:,1],mapper);
-        apos = torch.tensor(apos).to("cuda")
-        bpos = torch.tensor(bpos).to("cuda")
+        apos = torch.tensor(apos,device=ddev);
+        bpos = torch.tensor(bpos,device=ddev);
         tmscore1 = calc_tmscore(apos,bpos,len1);
         tmscore2 = calc_tmscore(apos,bpos,len2);
         #print(tmscore1)
@@ -444,80 +379,172 @@ def process_(pos1,pos2,realign=True):
             break;
     return {"tmscore1":maxscore1,"tmscore2":maxscore2,"rot":maxmat[0],"trans":maxmat[1]};
 
-res = process_(pos1,pos2,realign=True);
-rotp = res["rot"];
-transp = res["trans"];
 
-allresidues = load_atoms(file1);
-allatoms = [];
-allpositions = [];
-for rr in list(allresidues):
-    for aa_ in list(rr.keys()):
-        if aa_ == "idx":
-            continue;
-        aa = rr[aa_];
-        allatoms.append(aa);
-        allpositions.append([aa.x,aa.y,aa.z]);
-allpositions = torch.tensor(allpositions).to("cuda");
-res = torch.einsum(
-    "ab,bc->ac",allpositions,rotp
-);
-res += transp;
-allcas = [];
-for eii,aa in enumerate(allatoms):
-    if aa.atom_name == "CA":
-        allcas.append(res[eii]);
-print(allcas[0].shape)
-print(torch.stack(allcas,dim=0).shape)
-#raise Exception();
-maxmap = get_mapping(torch.stack(allcas,dim=0),pos2[:,1],8.0*8.0);
-aseq = [];
-bseq = [];
-ii = 0;
-while ii < len(maxmap):
-    if maxmap[ii] is not None:
-        bstart = maxmap[ii];
-        bend = maxmap[ii];
-        aend = ii;
-        for jj in range(ii+1,len(maxmap)):
-            if maxmap[jj] is not None:
-                if maxmap[jj] > bend:
-                    bend = maxmap[jj];
-                    aend = jj;
-                else:
-                    break;
-        aseq_ = ["{:>5} ".format(str(ii+1))];
-        bseq_ = ["{:>5} ".format(str(bstart+1))];
-        bi = bstart -1;
-        for jj in range(ii,aend+1):
-            if maxmap[jj] is None:
-                aseq_.append(seq1[jj]);
-                bseq_.append("-");
-            else:
-                while maxmap[jj] > bi+1:
-                    aseq_.append("-");
-                    bi += 1;
-                    bseq_.append(seq2[bi]);
-                aseq_.append(seq1[jj]);
-                bi += 1;
-                bseq_.append(seq2[bi])
-        aseq_.append(" "+str(aend+1));
-        bseq_.append(" "+str(bend+1));
-        aseq.append("".join(aseq_));
-        bseq.append("".join(bseq_));
-        ii = aend+1;
+def check_bool(v):
+    v = v.lower();
+    if v == "true" or v == "1":
+        return True;
+    if v == "false" or v == "0":
+        return False;
+    raise Exception("true or false or 1 or 0 are expected.");
+
+if __name__=="__main__":
+    parser = argparse.ArgumentParser();
+    parser.add_argument("--file1",required=True) ;
+    parser.add_argument("--file2",required=True) ;
+    parser.add_argument("--outfile",required=False,default=None);
+    parser.add_argument("--use_ca",required=False,default=False,type=check_bool);
+    parser.add_argument("--realign",required=False,default=False,type=check_bool);
+    parser.add_argument("--device",required=False,default="cpu");
+
+    args = parser.parse_args();
+
+    file1 = args.file1;
+    file2 = args.file2;
+    realign = args.realign;
+    outfile = args.outfile;
+    ddev = args.device;
+    use_ca = args.use_ca;
+
+    seq1 = [];
+    seq2 = [];
+    pos1 = [];
+    pos2 = [];
+
+    if not use_ca:
+        ncac1 = load_atoms(file1,targets=set(["N","CA","C"]));
+        ncac2 = load_atoms(file2,targets=set(["N","CA","C"]));
+        for aa in ncac1:
+            seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+        for aa in ncac2:
+            seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+
+        for ff in list(ncac1):
+            pos1.append([
+                [ff["N"].x,ff["N"].y,ff["N"].z],
+                [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+                [ff["C"].x,ff["C"].y,ff["C"].z]
+            ]);
+
+        for ff in list(ncac2):
+            pos2.append([
+                [ff["N"].x,ff["N"].y,ff["N"].z],
+                [ff["CA"].x,ff["CA"].y,ff["CA"].z],
+                [ff["C"].x,ff["C"].y,ff["C"].z]
+            ]);
     else:
-        ii += 1;
+        ca1 = load_atoms(file1,targets=set(["CA"]));
+        ca2 = load_atoms(file2,targets=set(["CA"]));
+        for aa in list(ca1):
+            seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
+        for aa in list(ca2):
+            seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
 
-with open(outfile,"wt") as fout:
-    for ii in range(len(allatoms)):
-        atom = allatoms[ii];
-        atom.x = res[ii,0];
-        atom.y = res[ii,1];
-        atom.z = res[ii,2];
-        fout.write(atom.make_line()+"\n");
-for aa,bb in zip(aseq,bseq):
-    print(aa);
-    print(bb);
-    print();
+        # ca を 3 つ使用して三角形を作る
+        # 最初と最後は並ぶことを想定していないダミー
+        def ca_triangle(cas):
+            ret = [];
+            ret.append([
+                [cas[2]["CA"].x,cas[2]["CA"].y,cas[2]["CA"].z],
+                [cas[0]["CA"].x,cas[0]["CA"].y,cas[0]["CA"].z],
+                [cas[1]["CA"].x,cas[1]["CA"].y,cas[1]["CA"].z]
+            ]);
+            for ii in range(1,len(cas)-1):
+                ret.append([
+                    [cas[ii-1]["CA"].x,cas[ii-1]["CA"].y,cas[ii-1]["CA"].z],
+                    [cas[ii]["CA"].x,cas[ii]["CA"].y,cas[ii]["CA"].z],
+                    [cas[ii+1]["CA"].x,cas[ii+1]["CA"].y,cas[ii+1]["CA"].z]
+                ]);
+
+            ret.append([
+                [cas[-3]["CA"].x,cas[-3]["CA"].y,cas[-3]["CA"].z],
+                [cas[-1]["CA"].x,cas[-1]["CA"].y,cas[-1]["CA"].z],
+                [cas[-2]["CA"].x,cas[-2]["CA"].y,cas[-2]["CA"].z]
+            ]);
+            return ret;
+        pos1 = ca_triangle(ca1);
+        pos2 = ca_triangle(ca2);
+
+    len1 = len(pos1);
+    len2 = len(pos2);
+
+    pos1 = torch.tensor(pos1).to(ddev);
+    pos2 = torch.tensor(pos2).to(ddev);
+
+    res = process_(pos1,pos2,realign=realign);
+    rotp = res["rot"];
+    transp = res["trans"];
+
+    allresidues = load_atoms(file1);
+    allatoms = [];
+    allpositions = [];
+    for rr in list(allresidues):
+        for aa_ in list(rr.keys()):
+            if aa_ == "idx":
+                continue;
+            aa = rr[aa_];
+            allatoms.append(aa);
+            allpositions.append([aa.x,aa.y,aa.z]);
+    allpositions = torch.tensor(allpositions).to(ddev);
+    res = torch.einsum(
+        "ab,bc->ac",allpositions,rotp
+    );
+    res += transp;
+    allcas = [];
+    for eii,aa in enumerate(allatoms):
+        if aa.atom_name == "CA":
+            allcas.append(res[eii]);
+    print(allcas[0].shape)
+    print(torch.stack(allcas,dim=0).shape)
+    #raise Exception();
+    maxmap = get_mapping(torch.stack(allcas,dim=0),pos2[:,1],8.0*8.0);
+    aseq = [];
+    bseq = [];
+    ii = 0;
+    while ii < len(maxmap):
+        if maxmap[ii] is not None:
+            bstart = maxmap[ii];
+            bend = maxmap[ii];
+            aend = ii;
+            for jj in range(ii+1,len(maxmap)):
+                if maxmap[jj] is not None:
+                    if maxmap[jj] > bend:
+                        bend = maxmap[jj];
+                        aend = jj;
+                    else:
+                        break;
+            aseq_ = ["{:>5} ".format(str(ii+1))];
+            bseq_ = ["{:>5} ".format(str(bstart+1))];
+            bi = bstart -1;
+            for jj in range(ii,aend+1):
+                if maxmap[jj] is None:
+                    aseq_.append(seq1[jj]);
+                    bseq_.append("-");
+                else:
+                    while maxmap[jj] > bi+1:
+                        aseq_.append("-");
+                        bi += 1;
+                        bseq_.append(seq2[bi]);
+                    aseq_.append(seq1[jj]);
+                    bi += 1;
+                    bseq_.append(seq2[bi])
+            aseq_.append(" "+str(aend+1));
+            bseq_.append(" "+str(bend+1));
+            aseq.append("".join(aseq_));
+            bseq.append("".join(bseq_));
+            ii = aend+1;
+        else:
+            ii += 1;
+    if outfile is not None:
+        with open(outfile,"wt") as fout:
+            for ii in range(len(allatoms)):
+                atom = allatoms[ii];
+                atom.x = res[ii,0];
+                atom.y = res[ii,1];
+                atom.z = res[ii,2];
+                fout.write(atom.make_line()+"\n");
+    for aa,bb in zip(aseq,bseq):
+        print("file1:",aa);
+        print("file2:",bb);
+        print();
 
