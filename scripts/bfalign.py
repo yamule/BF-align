@@ -96,8 +96,8 @@ def dist2(apos,bpos):
     return dis;
 
 # Construct local axis from 3 points.
-# I couldn't remember where I learned this algorithm. It may be more than 10 years ago.
-# I think some tutorials of Three.js or DirectX.
+# I can't remember where I learned this algorithm. It may be more than 10 years ago.
+# I think in some tutorials of Three.js or OpenGL.
 def pos_to_frame(arr):
     assert len(arr.shape) == 3;
     n_ca = normalize(arr[:,0]-arr[:,1]);
