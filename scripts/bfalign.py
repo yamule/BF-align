@@ -536,8 +536,8 @@ if __name__=="__main__":
                 fout.write(atom.make_line()+"\n");
     print("file1:",args.file1);
     print("file2:",args.file2);
-    print("TM-score normalized by file1 structure:",align_result["tmscore1"]);
-    print("TM-score normalized by file2 structure:",align_result["tmscore2"]);
+    print("TM-score normalized by file1 structure:",float(align_result["tmscore1"].detach().cpu()));
+    print("TM-score normalized by file2 structure:",float(align_result["tmscore2"].detach().cpu()));
     for aa,bb in zip(aseq,bseq):
         print("file1:",aa);
         print("file2:",bb);
