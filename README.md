@@ -1,6 +1,6 @@
 # BF-align (Brute Force aligner)
 
-Fully sequence independent protein structure alignment with pytorch.
+Fully sequence independent protein structure alignment with pytorch, inspired by FAPE loss calculations by [AlphaFold2](https://github.com/google-deepmind/alphafold).
 
 ## Protocol
 
