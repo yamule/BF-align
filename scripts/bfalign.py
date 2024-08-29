@@ -28,7 +28,7 @@ class PDBAtom:
         self.element = line[76:78];
         self.charge = line[79:80];
     
-    # return labels without alt_pos
+    # Return labels without alt_loc.
     def get_atom_label(self):
         return self.chain_id+"#"+self.residue_name+"#"+str(self.residue_pos)+"#"+self.insertion_code+"#"+self.atom_name;
     
@@ -265,7 +265,7 @@ def get_mapping(apos,bpos,maxsqdist):
     
     return mapper;
 
-# mapper is an array of p1[index]->p2index. If not mapped to p2, it's 'None'.
+# 'mapper' is an array of p1[index]->p2index which indicates the closest atom paires. If a point in p1 is not mapped to p2, it's 'None'.
 # Returns two arrays with same length, where mapped points are at the same index.
 def get_mapped_arrays(p1,p2,mapper):
     apos = [];
@@ -282,8 +282,13 @@ def get_mapped_arrays(p1,p2,mapper):
         );
     return apos, bpos;
 
-
-def process_(pos1,pos2,realign=True):
+# pos1 and pos2 are torch.tensor which have shapes
+# (N, 3, 3)
+# The first dimension is length of a protein.
+# The second dimension specifies three atoms which construct triangles to align, which will typicall be backbone atoms; N, CA, C.
+# The last dimensions have xyz coordinates.
+# If realign == True, it performs structural alignment using points aligned with Biopython's SVDSuperimposer.
+def bfalign(pos1,pos2,realign=True):
     ddev = pos1.device
     rot1, trans1 = pos_to_frame(pos1);
 
@@ -320,10 +325,6 @@ def process_(pos1,pos2,realign=True):
     res_rot1 = rot1[i1];
     res_trans1 = trans1[i1];
     res_trans1 = torch.squeeze(torch.einsum("ab,bc->ac",res_rot1,res_trans1[:,None]));
-    print(res_trans1.shape)
-    print(res_rot1.shape)
-    print(pos1.shape)
-    # print(pos_1b[i1]);
     res_rot2 = rot2[i2];
 
     rotp = torch.einsum("ab,bc->ac",res_rot2.permute(1,0),res_rot1);
@@ -347,29 +348,21 @@ def process_(pos1,pos2,realign=True):
     print(allcas.shape)
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
     for _ in range(5):
-        #print(mapper)
         allcas = copy.deepcopy(allcas_);
-        #print("!!!",allcas[0]);
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
-        #print(np.array(apos).shape,np.array(bpos).shape);
-        #print(apos,bpos)
         sup = SVDSuperimposer();
         sup.set(np.array(bpos),np.array(apos));
         sup.run();
         rot,trans = sup.get_rotran();
         rot = torch.tensor(rot,device=ddev);
-        #print(rot);
         trans = torch.tensor(trans,device=ddev);
         allcas = torch.einsum("ab,bc->ac",allcas,rot)+trans;
         mapper = get_mapping(allcas,pos2[:,1],maxsqdist)
-        #print(mapper)
         apos,bpos = get_mapped_arrays(allcas,pos2[:,1],mapper);
         apos = torch.tensor(apos,device=ddev);
         bpos = torch.tensor(bpos,device=ddev);
         tmscore1 = calc_tmscore(apos,bpos,len1);
         tmscore2 = calc_tmscore(apos,bpos,len2);
-        #print(tmscore1)
-        #print(tmscore2)
         if tmscore1 > maxscore1:
             print(tmscore1,"<-",maxscore1)
             maxmat = (rot,trans);
@@ -391,12 +384,12 @@ def check_bool(v):
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser();
-    parser.add_argument("--file1",required=True) ;
-    parser.add_argument("--file2",required=True) ;
-    parser.add_argument("--outfile",required=False,default=None);
-    parser.add_argument("--use_ca",required=False,default=False,type=check_bool);
-    parser.add_argument("--realign",required=False,default=False,type=check_bool);
-    parser.add_argument("--device",required=False,default="cpu");
+    parser.add_argument("--file1",description='Query protein structure in PDB format to be aligned to file2 structure.',required=True) ;
+    parser.add_argument("--file2",description='Template protein structure in PDB format to align against.',required=True) ;
+    parser.add_argument("--outfile",description='Output file path of alignment result of file1 structure.',required=False,default=None);
+    parser.add_argument("--use_ca",description='Use 3 CA atoms for alignment.',required=False,default=False,type=check_bool);
+    parser.add_argument("--realign",description='Perform re-alignment with Biopython\'s SVDSuperimposer. ',required=False,default=False,type=check_bool);
+    parser.add_argument("--device",description='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
 
     args = parser.parse_args();
 
@@ -441,8 +434,8 @@ if __name__=="__main__":
         for aa in list(ca2):
             seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
 
-        # Create a triangle using 3 CA atoms.
-        # The first and last are dummy triangles not expected to align.
+        # Create a triangle using 3 consecutive (in the array, not in the peptide) CA atoms.
+        # The first and last triangles are dummy triangles not expected to align.
         def ca_triangle(cas):
             ret = [];
             ret.append([
@@ -472,7 +465,7 @@ if __name__=="__main__":
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
 
-    res = process_(pos1,pos2,realign=realign);
+    res = bfalign(pos1,pos2,realign=realign);
     rotp = res["rot"];
     transp = res["trans"];
 
@@ -495,9 +488,7 @@ if __name__=="__main__":
     for eii,aa in enumerate(allatoms):
         if aa.atom_name == "CA":
             allcas.append(res[eii]);
-    print(allcas[0].shape)
-    print(torch.stack(allcas,dim=0).shape)
-    #raise Exception();
+
     maxmap = get_mapping(torch.stack(allcas,dim=0),pos2[:,1],8.0*8.0);
     aseq = [];
     bseq = [];
@@ -544,6 +535,10 @@ if __name__=="__main__":
                 atom.y = res[ii,1];
                 atom.z = res[ii,2];
                 fout.write(atom.make_line()+"\n");
+    print("file1:",args.file1);
+    print("file2:",args.file2);
+    print("TM-score normalized by file1 structure:",res["tmscore1"]);
+    print("TM-score normalized by file2 structure:",res["tmscore2"]);
     for aa,bb in zip(aseq,bseq):
         print("file1:",aa);
         print("file2:",bb);
