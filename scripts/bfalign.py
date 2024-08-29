@@ -304,7 +304,7 @@ def bfalign(pos1,pos2,realign=True):
 
     capos1_2d = capos1_2d
     pos2 = pos2
-    print(capos1_2d.shape)
+
     max_score1 = 0.0;
     max_score2 = 0.0;
     max_index = (0,0);
@@ -316,9 +316,8 @@ def bfalign(pos1,pos2,realign=True):
             max_score1 = maxx;
             max_score2 = float(briefcheck2.max().detach().cpu());
             max_index = (ii,briefcheck.argmax());
-        #break;
-
-    print("max_score:",max_score1,"max_index:",max_index)
+        
+    # print("max_score:",max_score1,"max_index:",max_index)
 
     i1 = max_index[0]
     i2 = max_index[1]
@@ -345,12 +344,11 @@ def bfalign(pos1,pos2,realign=True):
     maxscore2 = 0.0;
     maxmat = None;
 
-    print(allcas.shape)
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
+    sup = SVDSuperimposer();
     for _ in range(5):
         allcas = copy.deepcopy(allcas_);
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
-        sup = SVDSuperimposer();
         sup.set(np.array(bpos),np.array(apos));
         sup.run();
         rot,trans = sup.get_rotran();
@@ -364,7 +362,8 @@ def bfalign(pos1,pos2,realign=True):
         tmscore1 = calc_tmscore(apos,bpos,len1);
         tmscore2 = calc_tmscore(apos,bpos,len2);
         if tmscore1 > maxscore1:
-            print(tmscore1,"<-",maxscore1)
+            # Update if the alignment was improved.
+            # print(tmscore1,"<-",maxscore1)
             maxmat = (rot,trans);
             maxscore1 = tmscore1;
             maxscore2 = tmscore2;
@@ -383,13 +382,13 @@ def check_bool(v):
     raise Exception("true or false or 1 or 0 are expected.");
 
 if __name__=="__main__":
-    parser = argparse.ArgumentParser();
-    parser.add_argument("--file1",description='Query protein structure in PDB format to be aligned to file2 structure.',required=True) ;
-    parser.add_argument("--file2",description='Template protein structure in PDB format to align against.',required=True) ;
-    parser.add_argument("--outfile",description='Output file path of alignment result of file1 structure.',required=False,default=None);
-    parser.add_argument("--use_ca",description='Use 3 CA atoms for alignment.',required=False,default=False,type=check_bool);
-    parser.add_argument("--realign",description='Perform re-alignment with Biopython\'s SVDSuperimposer. ',required=False,default=False,type=check_bool);
-    parser.add_argument("--device",description='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
+    parser = argparse.ArgumentParser(prog="BF-align",description="Fully sequence independent structure alignment.");
+    parser.add_argument("--file1",help='Query protein structure in PDB format to be aligned to file2 structure.',required=True) ;
+    parser.add_argument("--file2",help='Template protein structure in PDB format to align against.',required=True) ;
+    parser.add_argument("--outfile",help='Output file path of alignment result of file1 structure.',required=False,default=None);
+    parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment.',required=False,default=False,type=check_bool);
+    parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. ',required=False,default=False,type=check_bool);
+    parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
 
     args = parser.parse_args();
 
@@ -465,9 +464,9 @@ if __name__=="__main__":
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
 
-    res = bfalign(pos1,pos2,realign=realign);
-    rotp = res["rot"];
-    transp = res["trans"];
+    align_result = bfalign(pos1,pos2,realign=realign);
+    rotp = align_result["rot"];
+    transp = align_result["trans"];
 
     allresidues = load_atoms(file1);
     allatoms = [];
@@ -537,8 +536,8 @@ if __name__=="__main__":
                 fout.write(atom.make_line()+"\n");
     print("file1:",args.file1);
     print("file2:",args.file2);
-    print("TM-score normalized by file1 structure:",res["tmscore1"]);
-    print("TM-score normalized by file2 structure:",res["tmscore2"]);
+    print("TM-score normalized by file1 structure:",align_result["tmscore1"]);
+    print("TM-score normalized by file2 structure:",align_result["tmscore2"]);
     for aa,bb in zip(aseq,bseq):
         print("file1:",aa);
         print("file2:",bb);
