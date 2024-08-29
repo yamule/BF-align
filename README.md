@@ -13,7 +13,23 @@ I recommend to install [TM-align](https://zhanggroup.org/TM-align/), [MM-align](
 
 I am not familiar with pytorch and I am not good at programming. If you have ideas about speeding up the script, please improve it!
 
-## How to use
+## Usage
+```
+usage: BF-align [-h] --file1 FILE1 --file2 FILE2 [--outfile OUTFILE] [--use_ca USE_CA] [--realign REALIGN] [--device DEVICE]
+
+Fully sequence independent structure alignment.
+
+optional arguments:
+  -h, --help         show this help message and exit
+  --file1 FILE1      Query protein structure in PDB format to be aligned to file2 structure.
+  --file2 FILE2      Template protein structure in PDB format to align against.
+  --outfile OUTFILE  Output file path of alignment result of file1 structure.
+  --use_ca USE_CA    Use 3 CA atoms for alignment.
+  --realign REALIGN  Perform re-alignment with Biopython's SVDSuperimposer.
+  --device DEVICE    Computation device: 'cpu' or 'cuda'.
+```
+
+## Example
 
 `python scripts/bfalign.py --file1 example_files/sample_input_T1065.pdb --file2 example_files/7m5f.pdb --device cuda --realign True`
 
