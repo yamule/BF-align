@@ -194,12 +194,13 @@ def calc_tmscore(a,b,lnorm):
     d0_search2 = d0_search*d0_search;
 
     rmsd = a-b;
-    rmsd = torch.sum((rmsd*rmsd),dim=-1);
+    rmsd = rmsd.mul_(rmsd);
+    rmsd = torch.sum(rmsd,dim=-1);
     if len(a.shape) > 2:
         mask = torch.zeros_like(rmsd).scatter(-1, (-1.0*rmsd).argmax(-1,True), value=1);
-        mask = (rmsd <= d0_search2).to(torch.int32)*mask;
+        mask *= (rmsd <= d0_search2).to(torch.float32);
     else:
-        mask = (rmsd <= d0_search2).to(torch.int32);
+        mask = (rmsd <= d0_search2).to(torch.float32);
     tmscores = (((1.0/(1.0+rmsd/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
     
     return tmscores;
@@ -288,7 +289,7 @@ def get_mapped_arrays(p1,p2,mapper):
 # The second dimension specifies three atoms which construct triangles to align, which will typicall be backbone atoms; N, CA, C.
 # The last dimensions have xyz coordinates.
 # If realign == True, it performs structural alignment using points aligned with Biopython's SVDSuperimposer.
-def bfalign(pos1,pos2,realign=True):
+def bfalign(pos1,pos2,realign=True,chunk_size=1):
     ddev = pos1.device
     rot1, trans1 = pos_to_frame(pos1);
 
@@ -301,22 +302,27 @@ def bfalign(pos1,pos2,realign=True):
     capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
     capos1_2d += trans2[None,:,None,:];
 
-
-    capos1_2d = capos1_2d
-    pos2 = pos2
-
     max_score1 = 0.0;
     max_score2 = 0.0;
     max_index = (0,0);
-    for ii in range(capos1_2d.shape[0]):
-        briefcheck = calc_tmscore(capos1_2d[ii],pos2[:,None,1:2],capos1_2d.shape[0])
-        briefcheck2 = calc_tmscore(capos1_2d[ii],pos2[:,None,1:2],pos2.shape[0])
-        maxx = float(briefcheck.max().detach().cpu());
-        if maxx > max_score1:
-            max_score1 = maxx;
-            max_score2 = float(briefcheck2.max().detach().cpu());
-            max_index = (ii,briefcheck.argmax());
+
+    if chunk_size is None:
+        chunk_size = int(16*40000/(capos1_2d.shape[0]*pos2.shape[0]))+1; # For my small memory GPU
+
+    for ii in range(0,capos1_2d.shape[0],chunk_size):
+        chunk_start = ii;
+        chunk_end = min([chunk_start+chunk_size,capos1_2d.shape[0]]);
+        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],capos1_2d.shape[0])
+        chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],pos2.shape[0])
         
+        chunk_max_score1, chunk_max_index_1 = chunk_briefcheck.max(dim=0);
+        chunk_max_score1b, chunk_max_index_1b = chunk_max_score1.max(dim=0);
+        chunk_max_score2, chunk_max_index_2 = chunk_briefcheck2.max(dim=0);
+        if chunk_max_score1b > max_score1:
+            max_score1 = float(chunk_max_score1b);
+            max_score2 = float(chunk_max_score2.max(dim=0)[0]);
+            max_index = (ii+chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]);
+
     # print("max_score:",max_score1,"max_index:",max_index)
 
     i1 = max_index[0]
@@ -392,6 +398,7 @@ if __name__=="__main__":
     parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment.',required=False,default=False,type=check_bool);
     parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. ',required=False,default=False,type=check_bool);
     parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
+    parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch.',required=False,default=None,type=int);
 
     args = parser.parse_args();
 
@@ -401,6 +408,7 @@ if __name__=="__main__":
     outfile = args.outfile;
     ddev = args.device;
     use_ca = args.use_ca;
+    chunk_size = args.chunk_size;
 
     seq1 = [];
     seq2 = [];
@@ -467,7 +475,7 @@ if __name__=="__main__":
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
 
-    align_result = bfalign(pos1,pos2,realign=realign);
+    align_result = bfalign(pos1,pos2,realign=realign,chunk_size=chunk_size);
     rotp = align_result["rot"];
     transp = align_result["trans"];
 
