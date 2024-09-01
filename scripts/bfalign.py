@@ -81,7 +81,7 @@ def normalize(arr):
     dis = torch.sqrt(((arr)*(arr)).sum(axis=-1));
     return arr/dis[:,None];
 
-def calc_norm(a):
+def calc_normal(a):
     s = a[:,0,1]*a[:,1,2] - a[:,1,1]*a[:,0,2];
     t = -(a[:,0,0]*a[:,1,2] - a[:,1,0]*a[:,0,2]);
     u = a[:,0,0]*a[:,1,1] - a[:,1,0]*a[:,0,1];
@@ -103,13 +103,13 @@ def pos_to_frame(arr):
     assert len(arr.shape) == 3;
     n_ca = normalize(arr[:,0]-arr[:,1]);
     c_ca = normalize(arr[:,2]-arr[:,1]);
-    norm = normalize(calc_norm(torch.stack([n_ca,c_ca],axis=1)));
-    norm2 =  normalize(calc_norm(torch.stack([n_ca,norm],axis=1)));
+    norma = normalize(calc_normal(torch.stack([n_ca,c_ca],axis=1)));
+    norma2 =  normalize(calc_normal(torch.stack([n_ca,norma],axis=1)));
     
-    # print(dist(norm,n_ca));
-    # print(dist(norm,norm2));
-    # print(dist(n_ca,norm2));
-    return torch.stack([n_ca,norm,norm2],axis=1),arr[:,1];
+    # print(dist(norma,n_ca));
+    # print(dist(norma,norma2));
+    # print(dist(n_ca,norma2));
+    return torch.stack([n_ca,norma,norma2],axis=1),arr[:,1];
 
 def load_atoms(infile,targets=None):
     if infile.endswith("pdb.gz"):
