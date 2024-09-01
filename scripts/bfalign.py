@@ -3,6 +3,7 @@ import numpy as np;
 import gzip;       
 import torch;
 import argparse;
+import copy;
 
 aa_3_1_ = {"ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E"
 ,"GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P"
@@ -152,6 +153,20 @@ def load_atoms(infile,targets=None):
             ret.append(pdic);
     return ret;
 
+def get_filtered_list(residues,targets):
+    ret = [];
+    for ii in range(len(residues)):
+        ares = {};
+        for kk in targets:
+            if kk in residues[ii]:
+                ares[kk] = residues[ii][kk];
+        if len(ares.keys()) != len(targets):
+            continue;
+        if "idx" in residues[ii]:
+            ares["idx"] = residues[ii]["idx"];
+        ret.append(ares);
+    return ret;
+
 def calc_rmsdsum(a,b):
     rmsd = a-b;
     rmsd = torch.sqrt(torch.sum((rmsd*rmsd),dim=-1));
@@ -173,6 +188,7 @@ def calc_rmsdsum(a,b):
  *
 */
 """
+@torch.jit.script
 def calc_tmscore(a,b,lnorm):
     D0_MIN = torch.tensor(0.5);
 
@@ -325,10 +341,10 @@ def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
         if chunk_max_score1b > max_score1:
             max_score1 = float(chunk_max_score1b);
             #max_score2 = float(chunk_max_score2.max(dim=0)[0]);
-            max_score2 = chunk_briefcheck2[chunk_max_index_1[chunk_max_index_1b],chunk_max_index_1b]
+            max_score2 = float(chunk_briefcheck2[chunk_max_index_1[chunk_max_index_1b],chunk_max_index_1b])
             max_index = (ii+chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]);
-
-    # print("max_score:",max_score1,"max_index:",max_index)
+        
+    #print("max_score:",max_score1,"max_index:",max_index,flush=True)
 
     i1 = max_index[0]
     i2 = max_index[1]
@@ -341,6 +357,7 @@ def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
     pos_1b = torch.einsum("ab,cdb->cda",rotp,pos1);
     transp = pos2[i2,1] - pos_1b[i1,1];
     pos_1b += transp;
+
     if not realign:
         return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":rotp.permute(1,0),"trans":transp};
 
@@ -422,8 +439,10 @@ if __name__=="__main__":
     pos1 = [];
     pos2 = [];
 
+    allresidues = load_atoms(file1);
+
     if not use_ca:
-        ncac1 = load_atoms(file1,targets=set(["N","CA","C"]));
+        ncac1 = get_filtered_list(copy.deepcopy(allresidues),targets=["N","CA","C"]);
         ncac2 = load_atoms(file2,targets=set(["N","CA","C"]));
         for aa in ncac1:
             seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
@@ -444,7 +463,7 @@ if __name__=="__main__":
                 [ff["C"].x,ff["C"].y,ff["C"].z]
             ]);
     else:
-        ca1 = load_atoms(file1,targets=set(["CA"]));
+        ca1 = get_filtered_list(copy.deepcopy(allresidues),targets=["CA"]);
         ca2 = load_atoms(file2,targets=set(["CA"]));
         for aa in list(ca1):
             seq1.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
@@ -481,12 +500,11 @@ if __name__=="__main__":
 
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
-
+    
     align_result = bfalign(pos1,pos2,realign=realign,chunk_size=chunk_size,max_realign_iterate=max_realign);
     rotp = align_result["rot"];
     transp = align_result["trans"];
 
-    allresidues = load_atoms(file1);
     allatoms = [];
     allpositions = [];
     for rr in list(allresidues):
@@ -500,6 +518,7 @@ if __name__=="__main__":
     res = torch.einsum(
         "ab,bc->ac",allpositions,rotp
     );
+
     res += transp;
     allcas = [];
     for eii,aa in enumerate(allatoms):
@@ -509,6 +528,8 @@ if __name__=="__main__":
     maxmap = get_mapping(torch.stack(allcas,dim=0),pos2[:,1],8.0*8.0);
     aseq = [];
     bseq = [];
+    aca = [];
+    bca = [];
     ii = 0;
     while ii < len(maxmap):
         if maxmap[ii] is not None:
@@ -537,6 +558,8 @@ if __name__=="__main__":
                     aseq_.append(seq1[jj]);
                     bi += 1;
                     bseq_.append(seq2[bi])
+                    aca.append(allcas[jj]);
+                    bca.append(pos2[bi,1]);
             aseq_.append(" "+str(aend+1));
             bseq_.append(" "+str(bend+1));
             aseq.append("".join(aseq_));
@@ -552,10 +575,17 @@ if __name__=="__main__":
                 atom.y = res[ii,1];
                 atom.z = res[ii,2];
                 fout.write(atom.make_line()+"\n");
+    aca = torch.stack(aca,dim=0);
+    bca = torch.stack(bca,dim=0);
+    finalscore1 = calc_tmscore(aca,bca,len1);
+    finalscore2 = calc_tmscore(aca,bca,len2);
     print("file1:",args.file1);
     print("file2:",args.file2);
-    print("TM-score normalized by file1 structure:",align_result["tmscore1"]);
-    print("TM-score normalized by file2 structure:",align_result["tmscore2"]);
+    print("Tentetive TM-score normalized by file1 structure:",float(align_result["tmscore1"]));
+    print("Tentetive TM-score normalized by file2 structure:",float(align_result["tmscore2"]));
+    print("Final TM-score normalized by file1 structure:",float(finalscore1));
+    print("Final TM-score normalized by file2 structure:",float(finalscore2));
+    print("Alignment:");
     for aa,bb in zip(aseq,bseq):
         print("file1:",aa);
         print("file2:",bb);
