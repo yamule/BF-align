@@ -4,7 +4,7 @@ Fully sequence independent protein structure alignment with pytorch, inspired by
 
 ## Protocol
 
-1. Construct frames for all of residues using backbone N, CA, C atoms or 3 CAs (although it may not be a fully independent).
+1. Construct frames for all of residues using backbone N, CA, C atoms or 3 CAs (although it may not be a fully sequence independent).
 2. Perform all-against-all structural alignment with frames.
 3. Optional: Re-align atoms using Biopython's SVDSuperimposer, using the result of step 2 as the initial 'seed'.
 
