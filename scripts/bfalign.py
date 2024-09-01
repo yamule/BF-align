@@ -314,6 +314,8 @@ def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
     for ii in range(0,capos1_2d.shape[0],chunk_size):
         chunk_start = ii;
         chunk_end = min([chunk_start+chunk_size,capos1_2d.shape[0]]);
+        
+        # returns (len(pos2),chunk_size)
         chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],capos1_2d.shape[0])
         chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],pos2.shape[0])
         
@@ -322,7 +324,8 @@ def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
         chunk_max_score2, chunk_max_index_2 = chunk_briefcheck2.max(dim=0);
         if chunk_max_score1b > max_score1:
             max_score1 = float(chunk_max_score1b);
-            max_score2 = float(chunk_max_score2.max(dim=0)[0]);
+            #max_score2 = float(chunk_max_score2.max(dim=0)[0]);
+            max_score2 = chunk_briefcheck2[chunk_max_index_1[chunk_max_index_1b],chunk_max_index_1b]
             max_index = (ii+chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]);
 
     # print("max_score:",max_score1,"max_index:",max_index)
@@ -400,7 +403,7 @@ if __name__=="__main__":
     parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
     parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
     parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
-    parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch.',required=False,default=None,type=int);
+    parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch.',required=False,default=1,type=int);
     parser.add_argument("--max_realign",help='Maximum number of iteration to realign with SVDSuperimposer.',required=False,default=5,type=int);
 
     args = parser.parse_args();
