@@ -96,7 +96,7 @@ def dist2(apos,bpos):
     return dis;
 
 # Construct local axis from 3 points.
-# I can't remember where I learned this algorithm. It may be more than 10 years ago.
+# I don't recall where I learned this algorithm. It may have been more than 10 years ago.
 # I think in some tutorials of Three.js or OpenGL.
 def pos_to_frame(arr):
     assert len(arr.shape) == 3;
@@ -234,7 +234,7 @@ def get_mapping(apos,bpos,maxsqdist):
                 # dist2(CA_A2, CA_B1) > maxsqdist
                 # dist2(CA_A2, CA_B2) < maxsqdist
                 # The optimal mapping would be CA_A1->CA_B1, CA_A2->CA_B2
-                # However, this case is not handled. It will result in CA_A1->CA_B2, CA_A2->None.
+                # However, this case is not handled. It results in CA_A1->CA_B2, CA_A2->None.
 
                 for jj in range(dis.shape[1]):
                     ddis =  dis[ii,jj]
@@ -289,7 +289,9 @@ def get_mapped_arrays(p1,p2,mapper):
 # The second dimension specifies three atoms which construct triangles to align, which will typicall be backbone atoms; N, CA, C.
 # The last dimensions have xyz coordinates.
 # If realign == True, it performs structural alignment using points aligned with Biopython's SVDSuperimposer.
-def bfalign(pos1,pos2,realign=True,chunk_size=1):
+def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
+    assert max_realign_iterate > 0;
+    
     ddev = pos1.device
     rot1, trans1 = pos_to_frame(pos1);
 
@@ -352,7 +354,7 @@ def bfalign(pos1,pos2,realign=True,chunk_size=1):
 
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
     sup = SVDSuperimposer();
-    for _ in range(5):
+    for _ in range(max_realign_iterate):
         allcas = copy.deepcopy(allcas_);
         apos,bpos = get_mapped_arrays(allcas.detach().cpu().numpy(),pos2[:,1].detach().cpu().numpy(),mapper);
         sup.set(np.array(bpos),np.array(apos));
@@ -395,10 +397,11 @@ if __name__=="__main__":
     parser.add_argument("--file1",help='Query protein structure in PDB format to be aligned to file2 structure.',required=True) ;
     parser.add_argument("--file2",help='Template protein structure in PDB format to align against.',required=True) ;
     parser.add_argument("--outfile",help='Output file path of alignment result of file1 structure.',required=False,default=None);
-    parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment.',required=False,default=False,type=check_bool);
-    parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. ',required=False,default=False,type=check_bool);
+    parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
+    parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
     parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
     parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch.',required=False,default=None,type=int);
+    parser.add_argument("--max_realign",help='Maximum number of iteration to realign with SVDSuperimposer.',required=False,default=5,type=int);
 
     args = parser.parse_args();
 
@@ -409,6 +412,7 @@ if __name__=="__main__":
     ddev = args.device;
     use_ca = args.use_ca;
     chunk_size = args.chunk_size;
+    max_realign = args.max_realign;
 
     seq1 = [];
     seq2 = [];
@@ -444,7 +448,7 @@ if __name__=="__main__":
         for aa in list(ca2):
             seq2.append(aa_3_1_.get(aa["CA"].residue_name,"X"));
 
-        # Create a triangle using 3 consecutive (in the array, not in the peptide) CA atoms.
+        # Create a triangle using 3 consecutive CA atoms (consecutive in the array, not necessarily in the peptide).
         # The first and last triangles are dummy triangles not expected to align.
         def ca_triangle(cas):
             ret = [];
@@ -475,7 +479,7 @@ if __name__=="__main__":
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
 
-    align_result = bfalign(pos1,pos2,realign=realign,chunk_size=chunk_size);
+    align_result = bfalign(pos1,pos2,realign=realign,chunk_size=chunk_size,max_realign_iterate=max_realign);
     rotp = align_result["rot"];
     transp = align_result["trans"];
 
