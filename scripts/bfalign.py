@@ -188,7 +188,7 @@ def calc_rmsdsum(a,b):
  *
 */
 """
-@torch.jit.script
+# @torch.jit.script # It does not become so fast
 def calc_tmscore(a,b,lnorm):
     D0_MIN = torch.tensor(0.5);
 
