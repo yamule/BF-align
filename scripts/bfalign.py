@@ -413,15 +413,15 @@ def check_bool(v):
     raise Exception("true or false or 1 or 0 are expected.");
 
 if __name__=="__main__":
-    parser = argparse.ArgumentParser(prog="BF-align",description="Fully sequence independent structure alignment.");
+    parser = argparse.ArgumentParser(prog="python bfalign.py",description="Fully sequence independent structure alignment.");
     parser.add_argument("--file1",help='Query protein structure in PDB format to be aligned to file2 structure.',required=True) ;
     parser.add_argument("--file2",help='Template protein structure in PDB format to align against.',required=True) ;
-    parser.add_argument("--outfile",help='Output file path of alignment result of file1 structure.',required=False,default=None);
-    parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
-    parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. \'true\' or \'false\'.',required=False,default=False,type=check_bool);
-    parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'.',required=False,default="cpu");
-    parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch.',required=False,default=1,type=int);
-    parser.add_argument("--max_realign",help='Maximum number of iteration to realign with SVDSuperimposer.',required=False,default=5,type=int);
+    parser.add_argument("--outfile",help='Output file path of alignment result of file1 structure. Default: None.',required=False,default=None);
+    parser.add_argument("--use_ca",help='Use 3 CA atoms for alignment (More reasonable but not fully sequence independent). \'true\' or \'false\'. Default: false.',required=False,default=False,type=check_bool);
+    parser.add_argument("--realign",help='Perform re-alignment with Biopython\'s SVDSuperimposer. \'true\' or \'false\'. Default: false.',required=False,default=False,type=check_bool);
+    parser.add_argument("--device",help='Computation device: \'cpu\' or \'cuda\'. Default: cpu.',required=False,default="cpu");
+    parser.add_argument("--chunk_size",help='Chunk size when calculate TM-score with batch. Default: 1.',required=False,default=1,type=int);
+    parser.add_argument("--max_realign",help='Maximum number of iteration to realign with SVDSuperimposer. Default: 5.',required=False,default=5,type=int);
 
     args = parser.parse_args();
 

@@ -15,8 +15,8 @@ I am not familiar with pytorch and I am not good at programming. If you have ide
 
 ## Usage
 ```
-usage: BF-align [-h] --file1 FILE1 --file2 FILE2 [--outfile OUTFILE] [--use_ca USE_CA] [--realign REALIGN]
-                [--device DEVICE] [--chunk_size CHUNK_SIZE] [--max_realign MAX_REALIGN]
+usage: python bfalign.py [-h] --file1 FILE1 --file2 FILE2 [--outfile OUTFILE] [--use_ca USE_CA] [--realign REALIGN]
+                         [--device DEVICE] [--chunk_size CHUNK_SIZE] [--max_realign MAX_REALIGN]
 
 Fully sequence independent structure alignment.
 
@@ -24,14 +24,15 @@ optional arguments:
   -h, --help            show this help message and exit
   --file1 FILE1         Query protein structure in PDB format to be aligned to file2 structure.
   --file2 FILE2         Template protein structure in PDB format to align against.
-  --outfile OUTFILE     Output file path of alignment result of file1 structure.
-  --use_ca USE_CA       Use 3 CA atoms for alignment. 'true' or 'false'.
-  --realign REALIGN     Perform re-alignment with Biopython's SVDSuperimposer. 'true' or 'false'.
-  --device DEVICE       Computation device: 'cpu' or 'cuda'.
+  --outfile OUTFILE     Output file path of alignment result of file1 structure. Default: None.
+  --use_ca USE_CA       Use 3 CA atoms for alignment (More reasonable but not fully sequence independent). 'true' or
+                        'false'. Default: false.
+  --realign REALIGN     Perform re-alignment with Biopython's SVDSuperimposer. 'true' or 'false'. Default: false.
+  --device DEVICE       Computation device: 'cpu' or 'cuda'. Default: cpu.
   --chunk_size CHUNK_SIZE
-                        Chunk size when calculate TM-score with batch.
+                        Chunk size when calculate TM-score with batch. Default: 1.
   --max_realign MAX_REALIGN
-                        Maximum number of iteration to realign with SVDSuperimposer.
+                        Maximum number of iteration to realign with SVDSuperimposer. Default: 5.
 ```
 
 ## Example
