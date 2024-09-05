@@ -167,10 +167,10 @@ def get_filtered_list(residues,targets):
         ret.append(ares);
     return ret;
 
-def calc_rmsdsum(a,b):
-    rmsd = a-b;
-    rmsd = torch.sqrt(torch.sum((rmsd*rmsd),dim=-1));
-    briefcheck = torch.sum((torch.min(rmsd,dim=-1)[0] < 3.0).to(torch.int32),dim=-1);
+def calc_distsum(a,b):
+    dist = a-b;
+    dist = torch.sqrt(torch.sum((dist*dist),dim=-1));
+    briefcheck = torch.sum((torch.min(dist,dim=-1)[0] < 3.0).to(torch.int32),dim=-1);
     return briefcheck;
 """
 /* 
@@ -209,15 +209,15 @@ def calc_tmscore(a,b,lnorm):
     d02 = d0*d0;
     d0_search2 = d0_search*d0_search;
 
-    rmsd = a-b;
-    rmsd = rmsd.mul_(rmsd);
-    rmsd = torch.sum(rmsd,dim=-1);
+    sdist = a-b;
+    sdist = sdist.mul_(sdist);
+    sdist = torch.sum(sdist,dim=-1);
     if len(a.shape) > 2:
-        mask = torch.zeros_like(rmsd).scatter(-1, (-1.0*rmsd).argmax(-1,True), value=1);
-        mask *= (rmsd <= d0_search2).to(torch.float32);
+        mask = torch.zeros_like(sdist).scatter(-1, (-1.0*sdist).argmax(-1,True), value=1);
+        mask *= (sdist <= d0_search2).to(torch.float32);
     else:
-        mask = (rmsd <= d0_search2).to(torch.float32);
-    tmscores = (((1.0/(1.0+rmsd/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
+        mask = (sdist <= d0_search2).to(torch.float32);
+    tmscores = (((1.0/(1.0+sdist/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
     
     return tmscores;
 
