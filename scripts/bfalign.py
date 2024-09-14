@@ -4,6 +4,7 @@ import gzip;
 import torch;
 import argparse;
 import copy;
+import math;
 
 aa_3_1_ = {"ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E"
 ,"GLY":"G","HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P"
@@ -51,11 +52,11 @@ class PDBAtom:
         zz = "{:>.3f}".format(self.z);
         
         if len(xx) > 8:
-            raise Exception("string overflow".format(self.x));
+            raise Exception("string overflow {}".format(self.x));
         if len(yy) > 8:
-            raise Exception("string overflow".format(self.y));
+            raise Exception("string overflow {}".format(self.y));
         if len(zz) > 8:
-            raise Exception("string overflow".format(self.z));
+            raise Exception("string overflow {}".format(self.z));
         atomname = self.atom_name;
         if self.head == "ATOM  " and len(self.atom_name) < 4:
             atomname = " "+atomname;
@@ -213,7 +214,7 @@ def calc_tmscore(a,b,lnorm):
     sdist = sdist.mul_(sdist);
     sdist = torch.sum(sdist,dim=-1);
     if len(a.shape) > 2:
-        mask = torch.zeros_like(sdist).scatter(-1, (-1.0*sdist).argmax(-1,True), value=1);
+        mask = torch.zeros_like(sdist).scatter(-1, sdist.argmin(-1,True), value=1);
         mask *= (sdist <= d0_search2).to(torch.float32);
     else:
         mask = (sdist <= d0_search2).to(torch.float32);
@@ -305,7 +306,7 @@ def get_mapped_arrays(p1,p2,mapper):
 # The second dimension specifies three atoms which construct triangles to align, which will typicall be backbone atoms; N, CA, C.
 # The last dimensions have xyz coordinates.
 # If realign == True, it performs structural alignment using points aligned with Biopython's SVDSuperimposer.
-def bfalign(pos1,pos2,realign=True,chunk_size=1,max_realign_iterate=5):
+def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5):
     assert max_realign_iterate > 0;
     
     ddev = pos1.device
@@ -501,7 +502,7 @@ if __name__=="__main__":
     pos1 = torch.tensor(pos1).to(ddev);
     pos2 = torch.tensor(pos2).to(ddev);
     
-    align_result = bfalign(pos1,pos2,realign=realign,chunk_size=chunk_size,max_realign_iterate=max_realign);
+    align_result = bfalign(pos1,pos2,len1,len2,realign=realign,chunk_size=chunk_size,max_realign_iterate=max_realign);
     rotp = align_result["rot"];
     transp = align_result["trans"];
 
