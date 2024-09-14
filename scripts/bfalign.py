@@ -79,9 +79,9 @@ class PDBAtom:
         return ret;
 
 def normalize(arr):
-    dis = torch.sqrt(((arr)*(arr)).sum(axis=-1));
-    return arr/dis[:,None];
-
+    dis = torch.sqrt((arr * arr).sum(axis=-1));
+    return arr / dis.clamp(min=1e-8)[:, None];
+    
 def calc_normal(a):
     s = a[:,0,1]*a[:,1,2] - a[:,1,1]*a[:,0,2];
     t = -(a[:,0,0]*a[:,1,2] - a[:,1,0]*a[:,0,2]);
@@ -279,7 +279,7 @@ def get_mapping(apos,bpos,maxsqdist):
         updated = updated_new;
         idx = [];
 
-    assert len(mapper) == apos.shape[0]
+    assert len(mapper) == apos.shape[0];
     
     return mapper;
 
@@ -309,7 +309,7 @@ def get_mapped_arrays(p1,p2,mapper):
 def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5):
     assert max_realign_iterate > 0;
     
-    ddev = pos1.device
+    ddev = pos1.device;
     rot1, trans1 = pos_to_frame(pos1);
 
     revframe1 = rot1.permute(0,2,1);
@@ -347,8 +347,8 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         
     #print("max_score:",max_score1,"max_index:",max_index,flush=True)
 
-    i1 = max_index[0]
-    i2 = max_index[1]
+    i1 = max_index[0];
+    i2 = max_index[1];
     res_rot1 = rot1[i1];
     res_trans1 = trans1[i1];
     res_trans1 = torch.squeeze(torch.einsum("ab,bc->ac",res_rot1,res_trans1[:,None]));
@@ -362,7 +362,7 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
     if not realign:
         return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":rotp.permute(1,0),"trans":transp};
 
-    from Bio.SVDSuperimposer import SVDSuperimposer ;
+    from Bio.SVDSuperimposer import SVDSuperimposer;
     import copy;
     maxsqdist = 8.0*8.0;
 
@@ -392,10 +392,10 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         tmscore2 = calc_tmscore(apos,bpos,len2);
         
         # Update if the alignment was improved.
-        tmscore1 = float(tmscore1.detach().cpu())
+        tmscore1 = float(tmscore1.detach().cpu());
         # print(tmscore1," vs ",maxscore1)
         if tmscore1 > maxscore1:
-            tmscore2 = float(tmscore2.detach().cpu())
+            tmscore2 = float(tmscore2.detach().cpu());
             maxmat = (rot,trans);
             maxscore1 = tmscore1;
             maxscore2 = tmscore2;
