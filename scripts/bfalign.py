@@ -226,6 +226,9 @@ def calc_tmscore(a,b,lnorm,debug=False):
         mask *= (sdist <= d0_search2).to(torch.float32);
         v = sdist.argmin(-1,True);
         tmscores = (((1.0/(1.0+sdist/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
+        if debug:
+            for ii in range(tmscores.shape[0]):
+                print(tmscores[ii]);
         tmscores = tmscores[:,:,None]
         return tmscores;
     else:
@@ -345,7 +348,7 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         chunk_end = min([chunk_start+chunk_size,capos1_2d.shape[0]]);
         
         # returns (chunk_size,len(pos2),1)
-        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],capos1_2d.shape[0])[:,:,0]
+        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],capos1_2d.shape[0],debug=True)[:,:,0]
         chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],pos2.shape[0])[:,:,0]
 
         chunk_max_score1, chunk_max_index_1 = chunk_briefcheck.max(dim=1);
