@@ -28,7 +28,7 @@ class PDBAtom:
         self.occupancy = line[54:60];
         self.bfactor = line[60:66];
         self.element = line[76:78];
-        self.charge = line[79:80];
+        self.charge = line[78:80];
     
     # Return labels without alt_loc.
     def get_atom_label(self):
@@ -348,7 +348,7 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         chunk_end = min([chunk_start+chunk_size,capos1_2d.shape[0]]);
         
         # returns (chunk_size,len(pos2),1)
-        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],capos1_2d.shape[0],debug=True)[:,:,0]
+        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],capos1_2d.shape[0],debug=False)[:,:,0]
         chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],pos2.shape[0])[:,:,0]
 
         chunk_max_score1, chunk_max_index_1 = chunk_briefcheck.max(dim=1);
@@ -385,8 +385,8 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
     allcas_ = copy.deepcopy(pos1[:,1]);
     allcas = pos_1b[:,1];
     maxmap = None;
-    maxscore1 = 0.0;
-    maxscore2 = 0.0;
+    max_score1 = 0.0;
+    max_score2 = 0.0;
     maxmat = None;
 
     mapper = get_mapping(allcas,pos2[:,1],maxsqdist);
@@ -409,16 +409,18 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         
         # Update if the alignment was improved.
         tmscore1 = float(tmscore1.detach().cpu());
-        # print(tmscore1," vs ",maxscore1)
-        if tmscore1 > maxscore1:
+        # print(tmscore1," vs ",max_score1)
+        if tmscore1 > max_score1:
             tmscore2 = float(tmscore2.detach().cpu());
             maxmat = (rot,trans);
-            maxscore1 = tmscore1;
-            maxscore2 = tmscore2;
+            max_score1 = tmscore1;
+            max_score2 = tmscore2;
             maxmap = mapper;
         else:
             break;
-    return {"tmscore1":maxscore1,"tmscore2":maxscore2,"rot":maxmat[0],"trans":maxmat[1]};
+    if maxmat is None:
+        return None;
+    return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":maxmat[0],"trans":maxmat[1]};
 
 
 def check_bool(v):
@@ -598,8 +600,8 @@ if __name__=="__main__":
     finalscore2 = calc_tmscore(aca,bca,len2);
     print("file1:",args.file1);
     print("file2:",args.file2);
-    print("Tentetive TM-score normalized by file1 structure:",float(align_result["tmscore1"]));
-    print("Tentetive TM-score normalized by file2 structure:",float(align_result["tmscore2"]));
+    print("Tentative TM-score normalized by file1 structure:",float(align_result["tmscore1"]));
+    print("Tentative TM-score normalized by file2 structure:",float(align_result["tmscore2"]));
     print("Final TM-score normalized by file1 structure:",float(finalscore1));
     print("Final TM-score normalized by file2 structure:",float(finalscore2));
     print("Alignment:");
