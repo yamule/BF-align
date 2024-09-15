@@ -81,7 +81,7 @@ class PDBAtom:
 def normalize(arr):
     dis = torch.sqrt((arr * arr).sum(axis=-1));
     return arr / dis.clamp(min=1e-8)[:, None];
-    
+
 def calc_normal(a):
     s = a[:,0,1]*a[:,1,2] - a[:,1,1]*a[:,0,2];
     t = -(a[:,0,0]*a[:,1,2] - a[:,1,0]*a[:,0,2]);
@@ -190,7 +190,9 @@ def calc_distsum(a,b):
 */
 """
 # @torch.jit.script # It does not become so fast
-def calc_tmscore(a,b,lnorm):
+def calc_tmscore(a,b,lnorm,debug=False):
+
+    assert len(b.shape) == 2;
     D0_MIN = torch.tensor(0.5);
 
     d0=(1.24*pow((lnorm*1.0-15), 1.0/3)-1.8);
@@ -210,12 +212,22 @@ def calc_tmscore(a,b,lnorm):
     d02 = d0*d0;
     d0_search2 = d0_search*d0_search;
 
+    if len(a.shape) > 2:
+        assert len(a.shape) == 4;
+        a = a[:,:,None,:,:];
+        b = b[None,None,:,None,:];
+
     sdist = a-b;
     sdist = sdist.mul_(sdist);
     sdist = torch.sum(sdist,dim=-1);
+    
     if len(a.shape) > 2:
         mask = torch.zeros_like(sdist).scatter(-1, sdist.argmin(-1,True), value=1);
         mask *= (sdist <= d0_search2).to(torch.float32);
+        v = sdist.argmin(-1,True);
+        tmscores = (((1.0/(1.0+sdist/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
+        tmscores = tmscores[:,:,None]
+        return tmscores;
     else:
         mask = (sdist <= d0_search2).to(torch.float32);
     tmscores = (((1.0/(1.0+sdist/d02))*mask).sum(dim=-1)).sum(dim=-1)/lnorm;
@@ -314,8 +326,8 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
 
     revframe1 = rot1.permute(0,2,1);
 
-    capos1_2d = pos1[:,None,1]-pos1[None,:,1];
-    capos1_2d = torch.einsum("stp,tpx->stx",capos1_2d,revframe1);
+    capos1_2d = pos1[None,:,1]-pos1[:,None,1];
+    capos1_2d = torch.einsum("stp,spx->stx",capos1_2d,revframe1);
 
     rot2,trans2 = pos_to_frame(pos2);
     capos1_2d = torch.einsum("stp,upx->sutx",capos1_2d,rot2);
@@ -332,18 +344,19 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
         chunk_start = ii;
         chunk_end = min([chunk_start+chunk_size,capos1_2d.shape[0]]);
         
-        # returns (len(pos2),chunk_size)
-        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],capos1_2d.shape[0])
-        chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,None,None,1:2],pos2.shape[0])
-        
-        chunk_max_score1, chunk_max_index_1 = chunk_briefcheck.max(dim=0);
+        # returns (chunk_size,len(pos2),1)
+        chunk_briefcheck = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],capos1_2d.shape[0])[:,:,0]
+        chunk_briefcheck2 = calc_tmscore(capos1_2d[chunk_start:chunk_end],pos2[:,1],pos2.shape[0])[:,:,0]
+
+        chunk_max_score1, chunk_max_index_1 = chunk_briefcheck.max(dim=1);
         chunk_max_score1b, chunk_max_index_1b = chunk_max_score1.max(dim=0);
-        chunk_max_score2, chunk_max_index_2 = chunk_briefcheck2.max(dim=0);
+        chunk_max_score2, chunk_max_index_2 = chunk_briefcheck2.max(dim=1);
         if chunk_max_score1b > max_score1:
             max_score1 = float(chunk_max_score1b);
             #max_score2 = float(chunk_max_score2.max(dim=0)[0]);
-            max_score2 = float(chunk_briefcheck2[chunk_max_index_1[chunk_max_index_1b],chunk_max_index_1b])
+            max_score2 = float(chunk_briefcheck2[chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]])
             max_index = (ii+chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]);
+            max_pos = capos1_2d[ii+chunk_max_index_1b,chunk_max_index_1[chunk_max_index_1b]];
         
     #print("max_score:",max_score1,"max_index:",max_index,flush=True)
 
@@ -360,7 +373,7 @@ def bfalign(pos1,pos2,len1,len2,realign=True,chunk_size=1,max_realign_iterate=5)
     pos_1b += transp;
 
     if not realign:
-        return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":rotp.permute(1,0),"trans":transp};
+        return {"tmscore1":max_score1,"tmscore2":max_score2,"rot":rotp.permute(1,0),"trans":transp,"pos":max_pos};
 
     from Bio.SVDSuperimposer import SVDSuperimposer;
     import copy;
